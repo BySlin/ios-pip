@@ -86,6 +86,8 @@ jobs:
 
           [properties]
           needs_exe_wrapper = true
+          # 交叉编译 iOS 时无法运行目标程序，显式提供 long double 格式
+          longdouble_format = 'IEEE_DOUBLE_LE'
 
           [built-in options]
           c_args = ['-arch', '${IOS_ARCH}', '-isysroot', '${SYSROOT}', '-target', '${TARGET_TRIPLE}']
