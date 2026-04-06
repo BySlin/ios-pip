@@ -13,17 +13,15 @@ permissions:
 
 jobs:
   build:
-    name: iOS ${{ matrix.sdk }} / Python 3.14
+    name: iOS iphoneos / Python 3.14
     runs-on: macos-14
-    strategy:
-      fail-fast: false
-      matrix:
-        sdk: [iphoneos]
 
     env:
       OPENCV_VERSION: "4.13.0"
       NUMPY_VERSION: "2.4.4"
       IOS_DEPLOYMENT_TARGET: "13.0"
+      SDK: "iphoneos"
+      IOS_ARCH: "arm64"
 
     steps:
       - name: Checkout
@@ -34,16 +32,19 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Install build dependencies
+      - name: Install dependencies
+        shell: bash
         run: |
+          set -euxo pipefail
           brew update
           brew install cmake ninja pkg-config
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install --upgrade "ninja>=1.11.1" "Cython>=3.0.11"
+          python -m pip install --upgrade "meson>=1.7.0" "ninja>=1.11.1" "Cython>=3.0.0"
 
       - name: Fetch NumPy/OpenCV sources
+        shell: bash
         run: |
-          # NumPy 2.x 需要 vendored-meson（通过 submodule 提供）
+          set -euxo pipefail
           git clone --depth=1 --branch "v${NUMPY_VERSION}" --recurse-submodules --shallow-submodules https://github.com/numpy/numpy.git
           git clone --depth=1 --branch "${OPENCV_VERSION}" https://github.com/opencv/opencv.git
           git clone --depth=1 --branch "${OPENCV_VERSION}" https://github.com/opencv/opencv_contrib.git
@@ -53,22 +54,14 @@ jobs:
         run: |
           set -euxo pipefail
 
-          SDK="${{ matrix.sdk }}"
-          IOS_ARCH=arm64
           SYSROOT="$(xcrun --sdk "${SDK}" --show-sdk-path)"
           CC="$(xcrun --sdk "${SDK}" --find clang)"
           CXX="$(xcrun --sdk "${SDK}" --find clang++)"
           AR="$(xcrun --sdk "${SDK}" --find ar)"
           RANLIB="$(xcrun --sdk "${SDK}" --find ranlib)"
           STRIP="$(xcrun --sdk "${SDK}" --find strip)"
+          TARGET_TRIPLE="${IOS_ARCH}-apple-ios${IOS_DEPLOYMENT_TARGET}"
 
-          if [ "${SDK}" = "iphonesimulator" ]; then
-            TARGET_TRIPLE="arm64-apple-ios${IOS_DEPLOYMENT_TARGET}-simulator"
-          else
-            TARGET_TRIPLE="arm64-apple-ios${IOS_DEPLOYMENT_TARGET}"
-          fi
-
-          # NumPy(2.x) 使用 Meson 构建；这里通过 cross file 交叉编译 iOS 产物
           cat > numpy-ios.cross <<EOF
           [binaries]
           c = '${CC}'
@@ -86,7 +79,6 @@ jobs:
 
           [properties]
           needs_exe_wrapper = true
-          # 交叉编译 iOS 时无法运行目标程序，显式提供 long double 格式
           longdouble_format = 'IEEE_DOUBLE_LE'
 
           [built-in options]
@@ -96,49 +88,34 @@ jobs:
           cpp_link_args = ['-arch', '${IOS_ARCH}', '-isysroot', '${SYSROOT}', '-target', '${TARGET_TRIPLE}']
           EOF
 
-          # 强制使用 NumPy 自带 vendored Meson（官方要求，含 features 模块）
-          MESON_CMD=(python "numpy/vendored-meson/meson/meson.py")
-          test -f "numpy/vendored-meson/meson/meson.py"
-          "${MESON_CMD[@]}" --version
-
-          "${MESON_CMD[@]}" setup numpy-build-${{ matrix.sdk }} numpy \
+          python numpy/vendored-meson/meson/meson.py setup numpy-build numpy \
             --cross-file "${PWD}/numpy-ios.cross" \
-            --prefix "${PWD}/numpy-install/${{ matrix.sdk }}" \
+            --prefix "${PWD}/numpy-install/iphoneos" \
             -Dbuildtype=release \
             -Dallow-noblas=true
 
-          "${MESON_CMD[@]}" compile -C numpy-build-${{ matrix.sdk }}
-          "${MESON_CMD[@]}" install -C numpy-build-${{ matrix.sdk }}
+          python numpy/vendored-meson/meson/meson.py compile -C numpy-build
+          python numpy/vendored-meson/meson/meson.py install -C numpy-build
 
-          NUMPY_INCLUDE_DIR="$(find "numpy-install/${{ matrix.sdk }}" -type d -path '*/site-packages/numpy/_core/include' -print -quit || true)"
+          NUMPY_INCLUDE_DIR="$(find numpy-install/iphoneos -type d -path '*/site-packages/numpy/_core/include' -print -quit || true)"
           if [ -z "${NUMPY_INCLUDE_DIR}" ]; then
-            NUMPY_INCLUDE_DIR="$(find "numpy-install/${{ matrix.sdk }}" -type d -path '*/site-packages/numpy/core/include' -print -quit || true)"
+            NUMPY_INCLUDE_DIR="$(find numpy-install/iphoneos -type d -path '*/site-packages/numpy/core/include' -print -quit || true)"
           fi
-          if [ -z "${NUMPY_INCLUDE_DIR}" ]; then
-            echo "NumPy include directory not found" >&2
+          NUMPY_SITE_PACKAGES_DIR="$(find numpy-install/iphoneos -type d -path '*/site-packages' -print -quit || true)"
+
+          if [ -z "${NUMPY_INCLUDE_DIR}" ] || [ -z "${NUMPY_SITE_PACKAGES_DIR}" ]; then
+            echo "NumPy iOS headers/site-packages not found" >&2
             exit 1
           fi
-          NUMPY_INCLUDE_DIR="$(python -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "${NUMPY_INCLUDE_DIR}")"
 
-          NUMPY_SITE_PACKAGES_DIR="$(find "numpy-install/${{ matrix.sdk }}" -type d -path '*/site-packages' -print -quit || true)"
-          if [ -z "${NUMPY_SITE_PACKAGES_DIR}" ]; then
-            echo "NumPy site-packages directory not found" >&2
-            exit 1
-          fi
-          NUMPY_SITE_PACKAGES_DIR="$(python -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "${NUMPY_SITE_PACKAGES_DIR}")"
+          echo "NUMPY_INCLUDE_DIR=$(python -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "${NUMPY_INCLUDE_DIR}")" >> "${GITHUB_ENV}"
+          echo "NUMPY_SITE_PACKAGES_DIR=$(python -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "${NUMPY_SITE_PACKAGES_DIR}")" >> "${GITHUB_ENV}"
 
-          echo "NUMPY_INCLUDE_DIR=${NUMPY_INCLUDE_DIR}" >> "${GITHUB_ENV}"
-          echo "NUMPY_SITE_PACKAGES_DIR=${NUMPY_SITE_PACKAGES_DIR}" >> "${GITHUB_ENV}"
-
-      - name: Configure and build OpenCV Python binding for iOS
+      - name: Build OpenCV Python binding for iOS
         shell: bash
         run: |
           set -euxo pipefail
 
-          # iOS 模拟器和真机都使用 arm64，便于后续统一打包
-          IOS_ARCH=arm64
-
-          # Python 3.14 主机解释器用于生成绑定代码；目标产物为 iOS 平台可加载模块
           PYTHON_BIN="$(python -c 'import sys; print(sys.executable)')"
           PYTHON_INCLUDE_DIR="$(python -c 'import sysconfig; print(sysconfig.get_paths()["include"])')"
           PYTHON_LIB="$(python - <<'PY'
@@ -150,207 +127,85 @@ jobs:
           PY
           )"
 
-          # iOS SDK 的 MacTypes 定义了全局 Ptr，和绑定代码中的 SNAME=Ptr 冲突。
-          # 这里把析构调用改为模板函数，避免依赖 SNAME 的文本名。
-          python - <<'PY'
-          import re
-          from pathlib import Path
-          pycompat = Path("opencv/modules/python/src2/pycompat.hpp")
-          s = pycompat.read_text(encoding="utf-8")
-          helper = "template<typename T> static inline void pyopencv_destroy_at(T* p) { p->~T(); }\n"
-          if "pyopencv_destroy_at(" not in s:
-            s = helper + s
-            s = s.replace(
-              "((pyopencv_##CLASS_ID##_t*)self)->v.STORAGE::~SNAME(); \\",
-              "pyopencv_destroy_at(&((pyopencv_##CLASS_ID##_t*)self)->v); \\",
-              1
-            )
-          s = re.sub(r"(?<!:)\bPtr<", "cv::Ptr<", s)
-          pycompat.write_text(s, encoding="utf-8")
-
-          cv2cpp = Path("opencv/modules/python/src2/cv2.cpp")
-          c = cv2cpp.read_text(encoding="utf-8")
-          macro_block = (
-            "using namespace cv;\\n\\n"
-            "#define Ptr cv::Ptr\\n"
-            "#define Point cv::Point\\n"
-            "#define Point2f cv::Point2f\\n"
-            "#define Size cv::Size\\n"
-            "#define Rect cv::Rect\\n"
-          )
-          if "#define Ptr cv::Ptr" not in c:
-            c = c.replace("using namespace cv;\\n", macro_block, 1)
-          cv2cpp.write_text(c, encoding="utf-8")
-
-          cv2convert = Path("opencv/modules/python/src2/cv2_convert.cpp")
-          cc = cv2convert.read_text(encoding="utf-8")
-          for name in ("Point", "Point2f", "Size", "Rect", "Ptr"):
-            cc = re.sub(rf"(?<!:)\b{name}\b", f"cv::{name}", cc)
-          cv2convert.write_text(cc, encoding="utf-8")
-
-          py_async = Path("opencv/modules/core/misc/python/pyopencv_async.hpp")
-          pa = py_async.read_text(encoding="utf-8")
-          pa = re.sub(r"(?<!:)\bPtr<", "cv::Ptr<", pa)
-          py_async.write_text(pa, encoding="utf-8")
-          PY
-
           CMAKE_ARGS=(
             -DOPENCV_EXTRA_MODULES_PATH="${PWD}/opencv_contrib/modules"
             -DCMAKE_BUILD_TYPE=Release
-            -DCMAKE_INSTALL_PREFIX="${PWD}/install/${{ matrix.sdk }}"
+            -DCMAKE_INSTALL_PREFIX="${PWD}/install/iphoneos"
             -DCMAKE_SYSTEM_NAME=iOS
             -DAPPLE_FRAMEWORK=OFF
-            -DCMAKE_OSX_SYSROOT="${{ matrix.sdk }}"
+            -DCMAKE_OSX_SYSROOT="${SDK}"
             -DCMAKE_OSX_ARCHITECTURES="${IOS_ARCH}"
             -DCMAKE_OSX_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET}"
             -DOPENCV_EXTRA_CXX_FLAGS="-I${PWD}/opencv/3rdparty/dlpack/include"
             -DCMAKE_SHARED_LINKER_FLAGS="-framework Foundation -framework CoreFoundation -framework CoreGraphics -framework QuartzCore -framework UIKit"
             -DCMAKE_MODULE_LINKER_FLAGS="-framework Foundation -framework CoreFoundation -framework CoreGraphics -framework QuartzCore -framework UIKit"
             -DBUILD_SHARED_LIBS=ON
+            -DBUILD_LIST=core,imgproc,python3
             -DBUILD_TESTS=OFF
             -DBUILD_PERF_TESTS=OFF
             -DBUILD_EXAMPLES=OFF
             -DBUILD_opencv_apps=OFF
-            -DBUILD_opencv_dnn=OFF
-            -DBUILD_opencv_gapi=OFF
-            -DBUILD_opencv_highgui=OFF
-            -DBUILD_opencv_videoio=OFF
-            -DBUILD_opencv_imgcodecs=OFF
-            -DBUILD_opencv_java=OFF
-            -DBUILD_opencv_js=OFF
             -DBUILD_opencv_python2=OFF
             -DBUILD_opencv_python3=ON
-            -DBUILD_opencv_python_bindings_generator=ON
-            -DOPENCV_PYTHON3_INSTALL_PATH="${PWD}/install/${{ matrix.sdk }}/python"
+            -DOPENCV_PYTHON3_INSTALL_PATH="${PWD}/install/iphoneos/python"
             -DPYTHON_DEFAULT_EXECUTABLE="${PYTHON_BIN}"
             -DPython3_EXECUTABLE="${PYTHON_BIN}"
             -DPython3_INCLUDE_DIR="${PYTHON_INCLUDE_DIR}"
             -DPYTHON3_EXECUTABLE="${PYTHON_BIN}"
-            -DPYTHON3_INCLUDE_PATH="${PYTHON_INCLUDE_DIR}"
             -DPYTHON3_INCLUDE_DIR="${PYTHON_INCLUDE_DIR}"
+            -DPYTHON3_INCLUDE_PATH="${PYTHON_INCLUDE_DIR}"
             -DPYTHON3_NUMPY_INCLUDE_DIRS="${NUMPY_INCLUDE_DIR}"
-            -DPYTHON3_PACKAGES_PATH="${PWD}/install/${{ matrix.sdk }}/python"
+            -DPYTHON3_PACKAGES_PATH="${PWD}/install/iphoneos/python"
           )
 
-          # 某些 Python 3.14 分发版不暴露可链接的 libpython，存在时再传入
           if [ -n "${PYTHON_LIB}" ] && [ -f "${PYTHON_LIB}" ]; then
             CMAKE_ARGS+=(-DPYTHON3_LIBRARY="${PYTHON_LIB}")
           fi
 
-          cmake -S opencv -B build-${{ matrix.sdk }} -G Ninja "${CMAKE_ARGS[@]}"
+          cmake -S opencv -B build-iphoneos -G Ninja "${CMAKE_ARGS[@]}"
+          cmake --build build-iphoneos --config Release -j"$(sysctl -n hw.logicalcpu)"
+          cmake --install build-iphoneos --config Release
 
-          # 先生成 Python 绑定代码，再做定向修补，避免 iOS SDK 同名类型冲突
-          cmake --build build-${{ matrix.sdk }} --config Release --target gen_opencv_python_source -j"$(sysctl -n hw.logicalcpu)"
-
-          GENERATED_TYPES_FILE="$(find "build-${{ matrix.sdk }}" -type f -name 'pyopencv_generated_types_content.h' -print -quit || true)"
-          if [ -n "${GENERATED_TYPES_FILE}" ] && [ -f "${GENERATED_TYPES_FILE}" ]; then
-            python - <<'PY' "${GENERATED_TYPES_FILE}"
-          import re
-          import sys
-          p = sys.argv[1]
-          s = open(p, "r", encoding="utf-8").read()
-          for name in ("Point", "Point2f", "Rect", "Rect2f", "Size", "Size2f"):
-            s = re.sub(rf"(?<!:)\b{name}\b", f"cv::{name}", s)
-          open(p, "w", encoding="utf-8").write(s)
-          PY
-          fi
-
-          GENERATED_TYPES_HEADER="$(find "build-${{ matrix.sdk }}" -type f -name 'pyopencv_generated_types.h' -print -quit || true)"
-          if [ -n "${GENERATED_TYPES_HEADER}" ] && [ -f "${GENERATED_TYPES_HEADER}" ]; then
-            python - <<'PY' "${GENERATED_TYPES_HEADER}"
-          import re
-          import sys
-          p = sys.argv[1]
-          s = open(p, "r", encoding="utf-8").read()
-          s = re.sub(r"(?<!:)\bPtr<", "cv::Ptr<", s)
-          open(p, "w", encoding="utf-8").write(s)
-          PY
-          fi
-
-          cmake --build build-${{ matrix.sdk }} --config Release -j"$(sysctl -n hw.logicalcpu)"
-          cmake --install build-${{ matrix.sdk }} --config Release
-
-          # 必须确认真正生成了 cv2 扩展，避免产出空 wheel
-          CV2_EXT_COUNT="$(find "install/${{ matrix.sdk }}" -type f \( -name 'cv2*.so' -o -name 'cv2*.dylib' \) | wc -l | tr -d ' ')"
+          CV2_EXT_COUNT="$(find install/iphoneos -type f \( -name 'cv2*.so' -o -name 'cv2*.dylib' \) | wc -l | tr -d ' ')"
           if [ "${CV2_EXT_COUNT}" = "0" ]; then
-            echo "ERROR: cv2 extension not found. OpenCV Python binding was not generated." >&2
+            echo "ERROR: cv2 extension not found, OpenCV Python binding was not generated." >&2
             exit 1
           fi
 
-      - name: Pack artifacts
+      - name: Build wheel and package artifacts
         shell: bash
         run: |
           set -euxo pipefail
-          OUT_DIR="artifacts/${{ matrix.sdk }}"
+          OUT_DIR="artifacts/iphoneos"
           mkdir -p "${OUT_DIR}"
 
-          # 收集 iOS NumPy 构建产物
-          if [ -d "numpy-install/${{ matrix.sdk }}" ]; then
-            cp -R "numpy-install/${{ matrix.sdk }}" "${OUT_DIR}/numpy"
-          fi
+          cp -R "numpy-install/iphoneos" "${OUT_DIR}/numpy"
+          cp -R "install/iphoneos" "${OUT_DIR}/opencv-install"
 
-          # 收集 Python cv2 扩展和 OpenCV 依赖库
-          if [ -d "install/${{ matrix.sdk }}/lib/python3" ]; then
-            cp -R "install/${{ matrix.sdk }}/lib/python3" "${OUT_DIR}/"
-          fi
-          if [ -d "install/${{ matrix.sdk }}/lib" ]; then
-            cp -R "install/${{ matrix.sdk }}/lib" "${OUT_DIR}/lib"
-          fi
-          if [ -d "install/${{ matrix.sdk }}/include" ]; then
-            cp -R "install/${{ matrix.sdk }}/include" "${OUT_DIR}/include"
-          fi
-
-          # 额外打一个可分发的 wheel（iOS 平台 tag）
           WHEEL_ROOT="${PWD}/wheel-build"
           PKG_ROOT="${WHEEL_ROOT}/opencv_python_ios"
           rm -rf "${WHEEL_ROOT}"
           mkdir -p "${PKG_ROOT}/cv2/.dylibs"
 
-          CV2_SRC_DIR="$(find "install/${{ matrix.sdk }}" -type d -path '*/cv2' -print -quit || true)"
-          if [ -n "${CV2_SRC_DIR}" ] && [ -d "${CV2_SRC_DIR}" ]; then
-            cp -R "${CV2_SRC_DIR}/." "${PKG_ROOT}/cv2/"
-          fi
+          CV2_SRC_DIR="$(find install/iphoneos -type d -path '*/cv2' -print -quit || true)"
+          CV2_EXT="$(find install/iphoneos -type f \( -name 'cv2*.so' -o -name 'cv2*.dylib' \) -print -quit || true)"
 
-          # 某些布局下 cv2 是单个扩展文件，兜底复制到包目录
-          CV2_EXT="$(find "install/${{ matrix.sdk }}" -type f \( -name 'cv2*.so' -o -name 'cv2*.dylib' \) -print -quit || true)"
-          if [ -n "${CV2_EXT}" ]; then
-            cp "${CV2_EXT}" "${PKG_ROOT}/cv2/"
-          fi
-
-          if [ -z "${CV2_EXT}" ] && [ -z "${CV2_SRC_DIR}" ]; then
+          if [ -z "${CV2_SRC_DIR}" ] && [ -z "${CV2_EXT}" ]; then
             echo "ERROR: no cv2 files found for wheel packaging." >&2
             exit 1
           fi
 
+          if [ -n "${CV2_SRC_DIR}" ] && [ -d "${CV2_SRC_DIR}" ]; then
+            cp -R "${CV2_SRC_DIR}/." "${PKG_ROOT}/cv2/"
+          fi
+          if [ -n "${CV2_EXT}" ]; then
+            cp "${CV2_EXT}" "${PKG_ROOT}/cv2/"
+          fi
           if [ ! -f "${PKG_ROOT}/cv2/__init__.py" ]; then
-            cat > "${PKG_ROOT}/cv2/__init__.py" <<'PY'
-          import importlib
-          import pathlib
-          import sys
-
-          _pkg_dir = pathlib.Path(__file__).resolve().parent
-          _dylib_dir = _pkg_dir / ".dylibs"
-          if _dylib_dir.exists():
-            sys.path.insert(0, str(_dylib_dir))
-
-          # 兼容 cv2 单文件扩展安装布局
-          try:
-            from .cv2 import *  # type: ignore
-          except Exception:
-            _ext = next(_pkg_dir.glob("cv2*.so"), None) or next(_pkg_dir.glob("cv2*.dylib"), None)
-            if _ext is None:
-              raise
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("cv2.cv2", _ext)
-            mod = importlib.util.module_from_spec(spec)
-            assert spec and spec.loader
-            spec.loader.exec_module(mod)
-            globals().update({k: getattr(mod, k) for k in dir(mod) if not k.startswith("_")})
-          PY
+            echo "from .cv2 import *" > "${PKG_ROOT}/cv2/__init__.py"
           fi
 
-          # 附带 OpenCV dylib 依赖
-          find "install/${{ matrix.sdk }}/lib" -maxdepth 1 -type f -name "libopencv*.dylib" -exec cp {} "${PKG_ROOT}/cv2/.dylibs/" \;
+          find install/iphoneos/lib -maxdepth 1 -type f -name "libopencv*.dylib" -exec cp {} "${PKG_ROOT}/cv2/.dylibs/" \; || true
 
           cat > "${PKG_ROOT}/setup.py" <<'PY'
           from setuptools import setup, find_packages
@@ -378,16 +233,29 @@ jobs:
           )
 
           WHEEL_FILE="$(ls -1 "${PKG_ROOT}"/dist/*.whl | head -n 1)"
+          cp "${WHEEL_FILE}" "opencv-python-ios-iphoneos-py314.whl"
           cp "${WHEEL_FILE}" "${OUT_DIR}/"
-          cp "${WHEEL_FILE}" "opencv-python-ios-${{ matrix.sdk }}-py314.whl"
-          tar -czf "opencv-python-ios-${{ matrix.sdk }}-py314.tar.gz" -C artifacts "${{ matrix.sdk }}"
+
+          if ! python - <<'PY' "${WHEEL_FILE}"; then
+          import sys, zipfile
+          z = zipfile.ZipFile(sys.argv[1])
+          names = z.namelist()
+          ok = any(n.startswith("cv2/") and (n.endswith(".so") or n.endswith(".dylib")) for n in names)
+          print("wheel_has_cv2_ext:", ok)
+          sys.exit(0 if ok else 1)
+          PY
+            echo "ERROR: wheel exists but cv2 extension is missing." >&2
+            exit 1
+          fi
+
+          tar -czf "opencv-python-ios-iphoneos-py314.tar.gz" -C artifacts iphoneos
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: opencv-python-ios-${{ matrix.sdk }}-py314
+          name: opencv-python-ios-iphoneos-py314
           path: |
-            opencv-python-ios-${{ matrix.sdk }}-py314.tar.gz
-            opencv-python-ios-${{ matrix.sdk }}-py314.whl
-            artifacts/${{ matrix.sdk }}/*.whl
+            opencv-python-ios-iphoneos-py314.tar.gz
+            opencv-python-ios-iphoneos-py314.whl
+            artifacts/iphoneos/*.whl
           if-no-files-found: error
