@@ -39,21 +39,12 @@ jobs:
           brew update
           brew install cmake ninja pkg-config
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install --upgrade "meson>=1.8.0" "meson-python>=0.18.0" "ninja>=1.11.1" "Cython>=3.0.11"
-          python - <<'PY'
-          import importlib.util
-          import subprocess
-          import sys
-          spec = importlib.util.find_spec("mesonbuild.modules.features")
-          print("meson features module found:", bool(spec))
-          if spec is None:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "git+https://github.com/mesonbuild/meson.git"])
-          PY
-          python -m mesonbuild.mesonmain --version
+          python -m pip install --upgrade "ninja>=1.11.1" "Cython>=3.0.11"
 
       - name: Fetch NumPy/OpenCV sources
         run: |
-          git clone --depth=1 --branch "v${NUMPY_VERSION}" https://github.com/numpy/numpy.git
+          # NumPy 2.x 需要 vendored-meson（通过 submodule 提供）
+          git clone --depth=1 --branch "v${NUMPY_VERSION}" --recurse-submodules --shallow-submodules https://github.com/numpy/numpy.git
           git clone --depth=1 --branch "${OPENCV_VERSION}" https://github.com/opencv/opencv.git
           git clone --depth=1 --branch "${OPENCV_VERSION}" https://github.com/opencv/opencv_contrib.git
 
@@ -103,8 +94,9 @@ jobs:
           cpp_link_args = ['-arch', '${IOS_ARCH}', '-isysroot', '${SYSROOT}', '-target', '${TARGET_TRIPLE}']
           EOF
 
-          # 强制使用系统 meson（pip 安装的新版本），避免 numpy vendored 版本过旧
-          MESON_CMD=(python -m mesonbuild.mesonmain)
+          # 强制使用 NumPy 自带 vendored Meson（官方要求，含 features 模块）
+          MESON_CMD=(python "numpy/vendored-meson/meson/meson.py")
+          test -f "numpy/vendored-meson/meson/meson.py"
           "${MESON_CMD[@]}" --version
 
           "${MESON_CMD[@]}" setup numpy-build-${{ matrix.sdk }} numpy \
