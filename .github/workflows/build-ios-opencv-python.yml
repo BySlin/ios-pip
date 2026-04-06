@@ -47,6 +47,14 @@ jobs:
           set -euxo pipefail
           rm -rf numpy-builder numpy-wheelhouse
           git clone --depth=1 --branch v2.4.4 https://github.com/numpy/numpy.git numpy-builder
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("numpy-builder/requirements/ci_requirements.txt")
+          s = p.read_text(encoding="utf-8")
+          lines = [ln for ln in s.splitlines() if "scipy-openblas32" not in ln and "scipy-openblas64" not in ln]
+          p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print("patched", p)
+          PY
           mkdir -p numpy-wheelhouse
           (
             cd numpy-builder
@@ -54,6 +62,7 @@ jobs:
             CIBW_BUILD=cp314-ios_arm64_iphoneos \
             CIBW_ARCHS=arm64_iphoneos \
             CIBW_BUILD_VERBOSITY=2 \
+            CIBW_CONFIG_SETTINGS='setup-args=-Dallow-noblas=true build-dir=build' \
             CIBW_ENVIRONMENT='PIP_EXTRA_INDEX_URL=https://pypi.anaconda.org/scientific-python-nightly-wheels/simple' \
             python -m cibuildwheel --platform ios --output-dir "${GITHUB_WORKSPACE}/numpy-wheelhouse"
           )
