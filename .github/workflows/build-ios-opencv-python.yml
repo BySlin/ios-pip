@@ -84,6 +84,12 @@ jobs:
               "os.makedirs(os.path.dirname(config_py), exist_ok=True)\n        " + needle,
               1,
             )
+          if 'if not found and "gapi" not in relpath_re:' in s:
+            s = s.replace(
+              'if not found and "gapi" not in relpath_re:',
+              'if not found and "gapi" not in relpath_re and not ("ios" in sysconfig.get_platform() and relpath_re.startswith("python/cv2/python-")):',
+              1,
+            )
           p.write_text(s, encoding="utf-8")
           print("patched", p)
           PY
