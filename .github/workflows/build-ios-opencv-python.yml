@@ -162,7 +162,59 @@ jobs:
             CMAKE_ARGS+=(-DPYTHON3_LIBRARY="${PYTHON_LIB}")
           fi
 
+          # iOS SDK 里的 Point/Size/Rect/Ptr 与 OpenCV Python 绑定源码同名冲突，做最小限定修正
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          def qualify_basic_types(p: Path):
+              if not p.exists():
+                  return
+              s = p.read_text(encoding="utf-8")
+              for name in ("Point", "Point2f", "Size", "Rect"):
+                  s = re.sub(rf"(?<!:)\b{name}\b", f"cv::{name}", s)
+              s = re.sub(r"(?<!:)\bPtr<", "cv::Ptr<", s)
+              p.write_text(s, encoding="utf-8")
+
+          for f in (
+              "opencv/modules/python/src2/cv2.cpp",
+              "opencv/modules/python/src2/cv2_convert.cpp",
+              "opencv/modules/core/misc/python/pyopencv_async.hpp",
+              "opencv_contrib/modules/rgbd/misc/python/pyopencv_linemod.hpp",
+          ):
+              qualify_basic_types(Path(f))
+
+          pycompat = Path("opencv/modules/python/src2/pycompat.hpp")
+          if pycompat.exists():
+              s = pycompat.read_text(encoding="utf-8")
+              if "pyopencv_destroy_at(" not in s:
+                  s = "template<typename T> static inline void pyopencv_destroy_at(T* p) { p->~T(); }\n" + s
+              s = s.replace(
+                  "((pyopencv_##CLASS_ID##_t*)self)->v.STORAGE::~SNAME(); \\",
+                  "pyopencv_destroy_at(&((pyopencv_##CLASS_ID##_t*)self)->v); \\",
+              )
+              s = re.sub(r"(?<!:)\bPtr<", "cv::Ptr<", s)
+              pycompat.write_text(s, encoding="utf-8")
+          PY
+
           cmake -S opencv -B build-iphoneos -G Ninja "${CMAKE_ARGS[@]}"
+          cmake --build build-iphoneos --config Release --target gen_opencv_python_source -j"$(sysctl -n hw.logicalcpu)"
+
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          gen_dir = Path("build-iphoneos/modules/python_bindings_generator")
+          for name in ("pyopencv_generated_types.h", "pyopencv_generated_types_content.h"):
+              p = gen_dir / name
+              if not p.exists():
+                  continue
+              s = p.read_text(encoding="utf-8")
+              for t in ("Point", "Point2f", "Size", "Rect"):
+                  s = re.sub(rf"(?<!:)\b{t}\b", f"cv::{t}", s)
+              s = re.sub(r"(?<!:)\bPtr<", "cv::Ptr<", s)
+              p.write_text(s, encoding="utf-8")
+          PY
+
           cmake --build build-iphoneos --config Release -j"$(sysctl -n hw.logicalcpu)"
           cmake --install build-iphoneos --config Release
 
