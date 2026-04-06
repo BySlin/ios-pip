@@ -173,7 +173,9 @@ jobs:
             -DBUILD_opencv_js=OFF
             -DBUILD_opencv_python2=OFF
             -DBUILD_opencv_python3=ON
+            -DBUILD_opencv_python_bindings_generator=ON
             -DOPENCV_PYTHON3_INSTALL_PATH="${PWD}/install/${{ matrix.sdk }}/python"
+            -DPYTHON_DEFAULT_EXECUTABLE="${PYTHON_BIN}"
             -DPython3_EXECUTABLE="${PYTHON_BIN}"
             -DPython3_INCLUDE_DIR="${PYTHON_INCLUDE_DIR}"
             -DPYTHON3_EXECUTABLE="${PYTHON_BIN}"
