@@ -170,8 +170,16 @@ jobs:
 
           cv2cpp = Path("opencv/modules/python/src2/cv2.cpp")
           c = cv2cpp.read_text(encoding="utf-8")
-          for name in ("Point", "Point2f", "Size", "Rect"):
-            c = re.sub(rf"(?<!:)\b{name}\b", f"cv::{name}", c)
+          macro_block = (
+            "using namespace cv;\\n\\n"
+            "#define Ptr cv::Ptr\\n"
+            "#define Point cv::Point\\n"
+            "#define Point2f cv::Point2f\\n"
+            "#define Size cv::Size\\n"
+            "#define Rect cv::Rect\\n"
+          )
+          if "#define Ptr cv::Ptr" not in c:
+            c = c.replace("using namespace cv;\\n", macro_block, 1)
           cv2cpp.write_text(c, encoding="utf-8")
 
           cv2convert = Path("opencv/modules/python/src2/cv2_convert.cpp")
