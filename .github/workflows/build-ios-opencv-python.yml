@@ -51,6 +51,24 @@ jobs:
           git checkout 0745eb8f88032c65530734db2ef382afa4533a00
           git submodule update --init --recursive
 
+      - name: Patch pyproject build deps for cp314 iOS
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("builder/pyproject.toml")
+          s = p.read_text(encoding="utf-8")
+          out = []
+          for line in s.splitlines():
+            t = line.strip()
+            if t.startswith('"numpy<') or t.startswith('"numpy=='):
+              continue
+            out.append(line)
+          p.write_text("\n".join(out) + "\n", encoding="utf-8")
+          print("patched", p)
+          PY
+
       - name: Build iOS wheel via cibuildwheel
         shell: bash
         run: |
