@@ -20,7 +20,7 @@ jobs:
       IOS_DEPLOYMENT_TARGET: "13.0"
       CIBW_PLATFORM: "ios"
       CIBW_BUILD: "cp314-ios_arm64_iphoneos"
-      CIBW_SKIP: "pp* *-win* *-manylinux* *-musllinux* *-macosx*"
+      CIBW_SKIP: "*-win* *-manylinux* *-musllinux* *-macosx*"
       CIBW_ARCHS: "arm64_iphoneos"
       CIBW_BUILD_VERBOSITY: "2"
       OPENCV_PYTHON_PACKAGE_NAME: "opencv-python"
@@ -55,6 +55,24 @@ jobs:
           set -euxo pipefail
           rm -rf builder
           git clone --depth=1 --recurse-submodules --shallow-submodules https://github.com/Py-Swift/opencv-python-old.git builder
+
+      - name: Patch builder to skip numpy build dependency on iOS cp314
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("builder/pyproject.toml")
+          s = p.read_text(encoding="utf-8")
+          out = []
+          for line in s.splitlines():
+            t = line.strip()
+            if t.startswith('"numpy<') or t.startswith('"numpy=='):
+              continue
+            out.append(line)
+          p.write_text("\n".join(out) + "\n", encoding="utf-8")
+          print("patched", p)
+          PY
 
       - name: Build iOS wheel via cibuildwheel
         shell: bash
