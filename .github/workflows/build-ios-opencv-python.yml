@@ -72,6 +72,18 @@ jobs:
             out.append(line)
           p.write_text("\n".join(out) + "\n", encoding="utf-8")
           print("patched", p)
+
+          sp = Path("builder/setup.py")
+          ss = sp.read_text(encoding="utf-8")
+          needle = "with open(config_py, 'w') as opencv_init_config:"
+          if needle in ss and "os.makedirs(os.path.dirname(config_py), exist_ok=True)" not in ss:
+            ss = ss.replace(
+              needle,
+              "os.makedirs(os.path.dirname(config_py), exist_ok=True)\n        " + needle,
+              1,
+            )
+            sp.write_text(ss, encoding="utf-8")
+            print("patched", sp)
           PY
 
       - name: Build iOS wheel via cibuildwheel
