@@ -153,9 +153,10 @@ jobs:
           # iOS SDK 的 MacTypes 定义了全局 Ptr，和绑定代码中的 SNAME=Ptr 冲突。
           # 这里把析构调用改为模板函数，避免依赖 SNAME 的文本名。
           python - <<'PY'
+          import re
           from pathlib import Path
-          p = Path("opencv/modules/python/src2/pycompat.hpp")
-          s = p.read_text(encoding="utf-8")
+          pycompat = Path("opencv/modules/python/src2/pycompat.hpp")
+          s = pycompat.read_text(encoding="utf-8")
           helper = "template<typename T> static inline void pyopencv_destroy_at(T* p) { p->~T(); }\n"
           if "pyopencv_destroy_at(" not in s:
             s = helper + s
@@ -164,7 +165,14 @@ jobs:
               "pyopencv_destroy_at(&((pyopencv_##CLASS_ID##_t*)self)->v); \\",
               1
             )
-            p.write_text(s, encoding="utf-8")
+          s = re.sub(r"(?<!:)\bPtr<", "cv::Ptr<", s)
+          pycompat.write_text(s, encoding="utf-8")
+
+          cv2cpp = Path("opencv/modules/python/src2/cv2.cpp")
+          c = cv2cpp.read_text(encoding="utf-8")
+          for name in ("Point", "Point2f", "Size", "Rect"):
+            c = re.sub(rf"(?<!:)\b{name}\b", f"cv::{name}", c)
+          cv2cpp.write_text(c, encoding="utf-8")
           PY
 
           CMAKE_ARGS=(
