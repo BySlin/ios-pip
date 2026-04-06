@@ -82,13 +82,13 @@ jobs:
           cpp_link_args = ['-arch', 'arm64', '-isysroot', '${SYSROOT}', '-target', '${TARGET_TRIPLE}']
           EOF
 
-          python numpy-builder/vendored-meson/meson/meson.py setup numpy-build numpy-builder \
+          meson setup numpy-build numpy-builder \
             --cross-file "${PWD}/numpy-ios.cross" \
             --prefix "${PWD}/numpy-install/iphoneos" \
             -Dbuildtype=release \
             -Dallow-noblas=true
-          python numpy-builder/vendored-meson/meson/meson.py compile -C numpy-build
-          python numpy-builder/vendored-meson/meson/meson.py install -C numpy-build
+          meson compile -C numpy-build
+          meson install -C numpy-build
 
           NUMPY_INCLUDE_DIR="$(find numpy-install/iphoneos -type d -path '*/site-packages/numpy/_core/include' -print -quit || true)"
           if [ -z "${NUMPY_INCLUDE_DIR}" ]; then
