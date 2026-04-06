@@ -158,7 +158,6 @@ jobs:
             -DCMAKE_OSX_SYSROOT="${{ matrix.sdk }}"
             -DCMAKE_OSX_ARCHITECTURES="${IOS_ARCH}"
             -DCMAKE_OSX_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET}"
-            -DOPENCV_EXTRA_CXX_FLAGS="-D__MACTYPES__"
             -DCMAKE_SHARED_LINKER_FLAGS="-framework Foundation -framework CoreFoundation -framework CoreGraphics -framework QuartzCore -framework UIKit"
             -DCMAKE_MODULE_LINKER_FLAGS="-framework Foundation -framework CoreFoundation -framework CoreGraphics -framework QuartzCore -framework UIKit"
             -DBUILD_SHARED_LIBS=ON
@@ -193,6 +192,22 @@ jobs:
           fi
 
           cmake -S opencv -B build-${{ matrix.sdk }} -G Ninja "${CMAKE_ARGS[@]}"
+
+          # 先生成 Python 绑定代码，再做定向修补，避免 iOS SDK 同名类型冲突
+          cmake --build build-${{ matrix.sdk }} --config Release --target opencv_python_bindings_generator -j"$(sysctl -n hw.logicalcpu)"
+
+          GENERATED_TYPES_FILE="$(find "build-${{ matrix.sdk }}" -type f -name 'pyopencv_generated_types_content.h' -print -quit || true)"
+          if [ -n "${GENERATED_TYPES_FILE}" ] && [ -f "${GENERATED_TYPES_FILE}" ]; then
+            python - <<'PY' "${GENERATED_TYPES_FILE}"
+          import re
+          import sys
+          p = sys.argv[1]
+          s = open(p, "r", encoding="utf-8").read()
+          for name in ("Point", "Point2f", "Rect", "Rect2f", "Size", "Size2f", "Ptr"):
+            s = re.sub(rf"(?<!:)\b{name}\b", f"cv::{name}", s)
+          open(p, "w", encoding="utf-8").write(s)
+          PY
+          fi
 
           cmake --build build-${{ matrix.sdk }} --config Release -j"$(sysctl -n hw.logicalcpu)"
           cmake --install build-${{ matrix.sdk }} --config Release
