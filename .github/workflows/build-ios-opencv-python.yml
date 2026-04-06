@@ -158,8 +158,7 @@ jobs:
             -DCMAKE_OSX_SYSROOT="${{ matrix.sdk }}"
             -DCMAKE_OSX_ARCHITECTURES="${IOS_ARCH}"
             -DCMAKE_OSX_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET}"
-            -DCMAKE_C_FLAGS="-D__MACTYPES__"
-            -DCMAKE_CXX_FLAGS="-D__MACTYPES__"
+            -DOPENCV_EXTRA_CXX_FLAGS="-D__MACTYPES__"
             -DCMAKE_SHARED_LINKER_FLAGS="-framework Foundation -framework CoreFoundation -framework CoreGraphics -framework QuartzCore -framework UIKit"
             -DCMAKE_MODULE_LINKER_FLAGS="-framework Foundation -framework CoreFoundation -framework CoreGraphics -framework QuartzCore -framework UIKit"
             -DBUILD_SHARED_LIBS=ON
