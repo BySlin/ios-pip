@@ -152,6 +152,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_INSTALL_PREFIX="${PWD}/install/${{ matrix.sdk }}"
             -DCMAKE_SYSTEM_NAME=iOS
+            -DAPPLE_FRAMEWORK=OFF
             -DCMAKE_OSX_SYSROOT="${{ matrix.sdk }}"
             -DCMAKE_OSX_ARCHITECTURES="${IOS_ARCH}"
             -DCMAKE_OSX_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET}"
@@ -171,6 +172,7 @@ jobs:
             -DPython3_EXECUTABLE="${PYTHON_BIN}"
             -DPython3_INCLUDE_DIR="${PYTHON_INCLUDE_DIR}"
             -DPYTHON3_EXECUTABLE="${PYTHON_BIN}"
+            -DPYTHON3_INCLUDE_PATH="${PYTHON_INCLUDE_DIR}"
             -DPYTHON3_INCLUDE_DIR="${PYTHON_INCLUDE_DIR}"
             -DPYTHON3_NUMPY_INCLUDE_DIRS="${NUMPY_INCLUDE_DIR}"
             -DPYTHON3_PACKAGES_PATH="${PWD}/install/${{ matrix.sdk }}/python"
