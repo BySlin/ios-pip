@@ -23,7 +23,7 @@ jobs:
     env:
       OPENCV_VERSION: "4.13.0"
       NUMPY_VERSION: "2.4.4"
-      IOS_DEPLOYMENT_TARGET: "15.0"
+      IOS_DEPLOYMENT_TARGET: "13.0"
 
     steps:
       - name: Checkout
@@ -167,10 +167,13 @@ jobs:
             -DBUILD_opencv_js=OFF
             -DBUILD_opencv_python2=OFF
             -DBUILD_opencv_python3=ON
+            -DOPENCV_PYTHON3_INSTALL_PATH="${PWD}/install/${{ matrix.sdk }}/python"
+            -DPython3_EXECUTABLE="${PYTHON_BIN}"
+            -DPython3_INCLUDE_DIR="${PYTHON_INCLUDE_DIR}"
             -DPYTHON3_EXECUTABLE="${PYTHON_BIN}"
             -DPYTHON3_INCLUDE_DIR="${PYTHON_INCLUDE_DIR}"
             -DPYTHON3_NUMPY_INCLUDE_DIRS="${NUMPY_INCLUDE_DIR}"
-            -DPYTHON3_PACKAGES_PATH="${NUMPY_SITE_PACKAGES_DIR}"
+            -DPYTHON3_PACKAGES_PATH="${PWD}/install/${{ matrix.sdk }}/python"
           )
 
           # 某些 Python 3.14 分发版不暴露可链接的 libpython，存在时再传入
@@ -182,6 +185,13 @@ jobs:
 
           cmake --build build-${{ matrix.sdk }} --config Release -j"$(sysctl -n hw.logicalcpu)"
           cmake --install build-${{ matrix.sdk }} --config Release
+
+          # 必须确认真正生成了 cv2 扩展，避免产出空 wheel
+          CV2_EXT_COUNT="$(find "install/${{ matrix.sdk }}" -type f \( -name 'cv2*.so' -o -name 'cv2*.dylib' \) | wc -l | tr -d ' ')"
+          if [ "${CV2_EXT_COUNT}" = "0" ]; then
+            echo "ERROR: cv2 extension not found. OpenCV Python binding was not generated." >&2
+            exit 1
+          fi
 
       - name: Pack artifacts
         shell: bash
@@ -212,7 +222,7 @@ jobs:
           rm -rf "${WHEEL_ROOT}"
           mkdir -p "${PKG_ROOT}/cv2/.dylibs"
 
-          CV2_SRC_DIR="$(find "install/${{ matrix.sdk }}" -type d -path '*/site-packages/cv2' -print -quit || true)"
+          CV2_SRC_DIR="$(find "install/${{ matrix.sdk }}" -type d -path '*/cv2' -print -quit || true)"
           if [ -n "${CV2_SRC_DIR}" ] && [ -d "${CV2_SRC_DIR}" ]; then
             cp -R "${CV2_SRC_DIR}/." "${PKG_ROOT}/cv2/"
           fi
@@ -221,6 +231,11 @@ jobs:
           CV2_EXT="$(find "install/${{ matrix.sdk }}" -type f \( -name 'cv2*.so' -o -name 'cv2*.dylib' \) -print -quit || true)"
           if [ -n "${CV2_EXT}" ]; then
             cp "${CV2_EXT}" "${PKG_ROOT}/cv2/"
+          fi
+
+          if [ -z "${CV2_EXT}" ] && [ -z "${CV2_SRC_DIR}" ]; then
+            echo "ERROR: no cv2 files found for wheel packaging." >&2
+            exit 1
           fi
 
           if [ ! -f "${PKG_ROOT}/cv2/__init__.py" ]; then
@@ -275,7 +290,7 @@ jobs:
 
           (
             cd "${PKG_ROOT}"
-            python setup.py bdist_wheel --python-tag cp314 --plat-name ios_15_0_arm64
+            python setup.py bdist_wheel --python-tag cp314 --plat-name ios_13_0_arm64
           )
 
           WHEEL_FILE="$(ls -1 "${PKG_ROOT}"/dist/*.whl | head -n 1)"
