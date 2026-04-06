@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+# keep workflow deterministic across retries
 
 jobs:
   build:
