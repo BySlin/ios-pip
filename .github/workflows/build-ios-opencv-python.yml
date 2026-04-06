@@ -69,6 +69,19 @@ jobs:
           print("patched", p)
           PY
 
+      - name: Prepare NumPy headers for OpenCV Python wrapper
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf builder-numpy
+          git clone --depth=1 --branch v2.4.4 https://github.com/numpy/numpy.git builder-numpy
+          NUMPY_INCLUDE_DIR="${PWD}/builder-numpy/numpy/_core/include"
+          if [ ! -d "${NUMPY_INCLUDE_DIR}" ]; then
+            NUMPY_INCLUDE_DIR="${PWD}/builder-numpy/numpy/core/include"
+          fi
+          test -d "${NUMPY_INCLUDE_DIR}"
+          echo "CMAKE_ARGS=-DPYTHON3_NUMPY_INCLUDE_DIRS=${NUMPY_INCLUDE_DIR}" >> "${GITHUB_ENV}"
+
       - name: Patch setup.py config path for iOS packaging
         shell: bash
         run: |
@@ -107,6 +120,29 @@ jobs:
           cd builder
           python -m cibuildwheel --platform ios --output-dir wheelhouse
           ls -lah wheelhouse
+
+      - name: Validate wheel contains cv2 binary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL_FILE="$(ls -1 builder/wheelhouse/*.whl | head -n 1)"
+          python - <<'PY' "${WHEEL_FILE}"
+          import sys
+          import zipfile
+
+          wheel = sys.argv[1]
+          with zipfile.ZipFile(wheel) as zf:
+            names = zf.namelist()
+
+          bins = [n for n in names if n.endswith(".so") or n.endswith(".dylib")]
+          print("wheel:", wheel)
+          print("binary_count:", len(bins))
+          if bins:
+            for b in bins[:20]:
+              print(" ", b)
+          if not bins:
+            raise SystemExit("wheel has no compiled cv2 binary")
+          PY
 
       - name: Collect artifacts
         shell: bash
