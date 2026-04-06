@@ -107,19 +107,6 @@ jobs:
             print("patched missing-path rule in", sp)
           PY
 
-      - name: Prepare NumPy headers for OpenCV Python build
-        shell: bash
-        run: |
-          set -euxo pipefail
-          rm -rf builder-numpy
-          git clone --depth=1 --branch v2.4.4 https://github.com/numpy/numpy.git builder-numpy
-          NUMPY_INCLUDE_DIR="${PWD}/builder-numpy/numpy/_core/include"
-          if [ ! -d "${NUMPY_INCLUDE_DIR}" ]; then
-            NUMPY_INCLUDE_DIR="${PWD}/builder-numpy/numpy/core/include"
-          fi
-          test -d "${NUMPY_INCLUDE_DIR}"
-          echo "CMAKE_ARGS=-DOPENCV_PYTHON_SKIP_DETECTION=ON -DPYTHON3_NUMPY_INCLUDE_DIRS=${NUMPY_INCLUDE_DIR}" >> "${GITHUB_ENV}"
-
       - name: Build iOS wheel via cibuildwheel
         shell: bash
         run: |
@@ -147,12 +134,10 @@ jobs:
           with zipfile.ZipFile(wheel, "r") as zin:
             names = zin.namelist()
             cv2_ext_anywhere = [n for n in names if re.search(r"(^|/)cv2[^/]*\.(so|dylib)$", n)]
-            if not cv2_ext_anywhere:
-              print("No cv2 extension found anywhere in wheel")
-              raise SystemExit(1)
 
             with zipfile.ZipFile(tmp_wheel, "w", compression=zipfile.ZIP_DEFLATED) as zout:
               has_init = False
+              has_root_cv2_ext = False
               for info in zin.infolist():
                 data = zin.read(info.filename)
                 out_name = info.filename
@@ -160,6 +145,7 @@ jobs:
                 m = re.match(r"^python/cv2/(?:python-[^/]+/)?(cv2[^/]*\.(?:so|dylib))$", info.filename)
                 if m:
                   out_name = f"cv2/{m.group(1)}"
+                  has_root_cv2_ext = True
 
                 if re.match(r"^python/cv2/.*config.*\.py$", info.filename):
                   out_name = f"cv2/{os.path.basename(info.filename)}"
@@ -173,8 +159,27 @@ jobs:
                 zinfo.external_attr = info.external_attr
                 zout.writestr(zinfo, data)
 
+              if not has_root_cv2_ext:
+                import glob
+                candidates = []
+                candidates.extend(glob.glob("builder/_skbuild/**/cmake-install/python/cv2/python-*/cv2*.so", recursive=True))
+                candidates.extend(glob.glob("builder/_skbuild/**/cmake-install/python/cv2/python-*/cv2*.dylib", recursive=True))
+                candidates.extend(glob.glob("builder/_skbuild/**/cmake-build/**/cv2*.so", recursive=True))
+                candidates.extend(glob.glob("builder/_skbuild/**/cmake-build/**/cv2*.dylib", recursive=True))
+                candidates = [c for c in candidates if os.path.isfile(c)]
+                if candidates:
+                  ext_src = candidates[0]
+                  with open(ext_src, "rb") as f:
+                    zout.writestr(f"cv2/{os.path.basename(ext_src)}", f.read())
+                  has_root_cv2_ext = True
+                  print("injected cv2 extension from:", ext_src)
+
               if not has_init:
                 zout.writestr("cv2/__init__.py", "from .cv2 import *\n")
+
+              if not has_root_cv2_ext:
+                print("No cv2 extension found in wheel or _skbuild outputs")
+                raise SystemExit(1)
 
           tmp_wheel.replace(wheel)
           print("repaired wheel:", wheel)
