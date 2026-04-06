@@ -115,22 +115,69 @@ jobs:
           python -m cibuildwheel --platform ios --output-dir wheelhouse
           ls -lah wheelhouse
 
+      - name: Repair wheel layout for cv2 import
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL_FILE="$(ls -1 builder/wheelhouse/*.whl | head -n 1)"
+          python - <<'PY' "${WHEEL_FILE}"
+          import io
+          import os
+          import re
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          wheel = Path(sys.argv[1])
+          tmp_wheel = wheel.with_suffix(".repaired.whl")
+
+          with zipfile.ZipFile(wheel, "r") as zin:
+            names = zin.namelist()
+            cv2_ext_anywhere = [n for n in names if re.search(r"(^|/)cv2[^/]*\.(so|dylib)$", n)]
+            if not cv2_ext_anywhere:
+              print("No cv2 extension found anywhere in wheel")
+              raise SystemExit(1)
+
+            with zipfile.ZipFile(tmp_wheel, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+              has_init = False
+              for info in zin.infolist():
+                data = zin.read(info.filename)
+                out_name = info.filename
+
+                m = re.match(r"^python/cv2/(?:python-[^/]+/)?(cv2[^/]*\.(?:so|dylib))$", info.filename)
+                if m:
+                  out_name = f"cv2/{m.group(1)}"
+
+                if re.match(r"^python/cv2/.*config.*\.py$", info.filename):
+                  out_name = f"cv2/{os.path.basename(info.filename)}"
+
+                if info.filename == "python/cv2/__init__.py":
+                  out_name = "cv2/__init__.py"
+                  has_init = True
+
+                zinfo = zipfile.ZipInfo(out_name, date_time=info.date_time)
+                zinfo.compress_type = zipfile.ZIP_DEFLATED
+                zinfo.external_attr = info.external_attr
+                zout.writestr(zinfo, data)
+
+              if not has_init:
+                zout.writestr("cv2/__init__.py", "from .cv2 import *\n")
+
+          tmp_wheel.replace(wheel)
+          print("repaired wheel:", wheel)
+          PY
+
       - name: Validate wheel has cv2 extension
         shell: bash
         run: |
           set -euxo pipefail
           WHEEL_FILE="$(ls -1 builder/wheelhouse/*.whl | head -n 1)"
           python - <<'PY' "${WHEEL_FILE}"
-          import sys
-          import zipfile
-
+          import sys, zipfile
           wheel = sys.argv[1]
           with zipfile.ZipFile(wheel) as zf:
               names = zf.namelist()
-              has_cv2 = any(
-                  n.startswith("cv2/") and (n.endswith(".so") or n.endswith(".dylib"))
-                  for n in names
-              )
+          has_cv2 = any(n.startswith("cv2/") and (n.endswith(".so") or n.endswith(".dylib")) for n in names)
           print("wheel:", wheel)
           print("has_cv2_ext:", has_cv2)
           if not has_cv2:
