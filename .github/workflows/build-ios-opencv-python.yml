@@ -103,6 +103,36 @@ jobs:
               'if not found and "gapi" not in relpath_re and not ("ios" in sysconfig.get_platform() and relpath_re.startswith("python/cv2/")):',
               1,
             )
+
+          fallback_marker = 'print("Copying files from non-default sourcetree locations")'
+          if fallback_marker in ss and "fallback copy for iOS cv2 files" not in ss:
+            fallback_code = '''
+        # fallback copy for iOS cv2 files: regex-based discovery may miss cross-compile layouts
+        if "ios" in sysconfig.get_platform():
+            import fnmatch
+            copied_any = False
+            for root, _, files in os.walk(cmake_install_dir):
+                for fname in files:
+                    rel = os.path.relpath(os.path.join(root, fname), cmake_install_dir).replace(os.path.sep, "/")
+                    if not (
+                        fnmatch.fnmatch(rel, "python/cv2/**/cv2*.so")
+                        or fnmatch.fnmatch(rel, "python/cv2/**/cv2*.dylib")
+                        or fnmatch.fnmatch(rel, "python/cv2/**/__init__.py")
+                        or (rel.startswith("python/cv2/") and "config" in os.path.basename(rel) and rel.endswith(".py"))
+                    ):
+                        continue
+                    new_install_relpath = os.path.join("cv2", os.path.basename(rel))
+                    cls._setuptools_wrap._copy_file(
+                        os.path.join(cmake_install_dir, rel.replace("/", os.path.sep)),
+                        os.path.join(cmake_install_dir, new_install_relpath),
+                        hide_listing=False,
+                    )
+                    final_install_relpaths.append(new_install_relpath)
+                    copied_any = True
+            if not copied_any:
+                print("WARNING: iOS fallback copy found no cv2 files in", cmake_install_dir)
+'''
+            ss = ss.replace(fallback_marker, fallback_code + "\n        " + fallback_marker, 1)
             sp.write_text(ss, encoding="utf-8")
             print("patched missing-path rule in", sp)
           PY
