@@ -84,10 +84,16 @@ jobs:
               "os.makedirs(os.path.dirname(config_py), exist_ok=True)\n        " + needle,
               1,
             )
+          if "opencv_init_path = os.path.join(cmake_install_dir, 'python', 'cv2', '__init__.py')" not in s:
+            s = s.replace(
+              "opencv_init_config.write(custom_init_data)",
+              "opencv_init_config.write(custom_init_data)\n\n        opencv_init_path = os.path.join(cmake_install_dir, 'python', 'cv2', '__init__.py')\n        os.makedirs(os.path.dirname(opencv_init_path), exist_ok=True)\n        with open(opencv_init_path, 'w') as opencv_init_py:\n            opencv_init_py.write(custom_init_data)",
+              1,
+            )
           if 'if not found and "gapi" not in relpath_re:' in s:
             s = s.replace(
               'if not found and "gapi" not in relpath_re:',
-              'if not found and "gapi" not in relpath_re and not ("ios" in sysconfig.get_platform() and relpath_re.startswith("python/cv2/python-")):',
+              'if not found and "gapi" not in relpath_re and not ("ios" in sysconfig.get_platform() and (relpath_re.startswith("python/cv2/python-") or relpath_re == "python/cv2/__init__.py")):',
               1,
             )
           p.write_text(s, encoding="utf-8")
