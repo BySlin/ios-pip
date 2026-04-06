@@ -69,6 +69,25 @@ jobs:
           print("patched", p)
           PY
 
+      - name: Patch setup.py config path for iOS packaging
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("builder/setup.py")
+          s = p.read_text(encoding="utf-8")
+          needle = "with open(config_py, 'w') as opencv_init_config:"
+          if needle in s and "os.makedirs(os.path.dirname(config_py), exist_ok=True)" not in s:
+            s = s.replace(
+              needle,
+              "os.makedirs(os.path.dirname(config_py), exist_ok=True)\n        " + needle,
+              1,
+            )
+          p.write_text(s, encoding="utf-8")
+          print("patched", p)
+          PY
+
       - name: Build iOS wheel via cibuildwheel
         shell: bash
         run: |
