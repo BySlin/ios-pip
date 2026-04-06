@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-# keep workflow deterministic across retries
 
 jobs:
   build:
@@ -18,18 +17,10 @@ jobs:
     runs-on: macos-14
 
     env:
-      IOS_DEPLOYMENT_TARGET: "13.0"
-      CIBW_PLATFORM: "ios"
-      CIBW_BUILD: "cp314-ios_arm64_iphoneos"
-      CIBW_SKIP: "*-win* *-manylinux* *-musllinux* *-macosx*"
-      CIBW_ARCHS: "arm64_iphoneos"
+      CIBW_PLATFORM: ios
+      CIBW_BUILD: cp314-ios_arm64_iphoneos
+      CIBW_ARCHS: arm64_iphoneos
       CIBW_BUILD_VERBOSITY: "2"
-      OPENCV_PYTHON_PACKAGE_NAME: "opencv-python"
-      ENABLE_CONTRIB: "0"
-      ENABLE_HEADLESS: "1"
-      ENABLE_ROLLING: "0"
-      CI_BUILD: "1"
-      OPENCV_PYTHON_SKIP_GIT_COMMANDS: "1"
       IPHONEOS_DEPLOYMENT_TARGET: "13.0"
 
     steps:
@@ -48,95 +39,17 @@ jobs:
           brew update
           brew install cmake ninja pkg-config
           python -m pip install --upgrade pip
-          python -m pip install --upgrade "cibuildwheel>=2.20.0" build
+          python -m pip install --upgrade "cibuildwheel>=2.20.0"
 
-      - name: Clone reference builder (Py-Swift/opencv-python-old)
+      - name: Clone fixed upstream commit
         shell: bash
         run: |
           set -euxo pipefail
           rm -rf builder
-          git clone --depth=1 --recurse-submodules --shallow-submodules https://github.com/Py-Swift/opencv-python-old.git builder
-
-      - name: Patch builder to skip numpy build dependency on iOS cp314
-        shell: bash
-        run: |
-          set -euxo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("builder/pyproject.toml")
-          s = p.read_text(encoding="utf-8")
-          out = []
-          for line in s.splitlines():
-            t = line.strip()
-            if t.startswith('"numpy<') or t.startswith('"numpy=='):
-              continue
-            out.append(line)
-          p.write_text("\n".join(out) + "\n", encoding="utf-8")
-          print("patched", p)
-
-          sp = Path("builder/setup.py")
-          ss = sp.read_text(encoding="utf-8")
-          needle = "with open(config_py, 'w') as opencv_init_config:"
-          if needle in ss and "os.makedirs(os.path.dirname(config_py), exist_ok=True)" not in ss:
-            ss = ss.replace(
-              needle,
-              "os.makedirs(os.path.dirname(config_py), exist_ok=True)\n        " + needle,
-              1,
-            )
-          if "opencv_init_path = os.path.join(cmake_install_dir, 'python', 'cv2', '__init__.py')" not in ss:
-            ss = ss.replace(
-              "opencv_init_config.write(custom_init_data)",
-              "opencv_init_config.write(custom_init_data)\n\n        opencv_init_path = os.path.join(cmake_install_dir, 'python', 'cv2', '__init__.py')\n        os.makedirs(os.path.dirname(opencv_init_path), exist_ok=True)\n        with open(opencv_init_path, 'w') as opencv_init_py:\n            opencv_init_py.write(custom_init_data)",
-              1,
-            )
-
-          if "patched marker" not in ss:
-            ss += "\n# patched marker\n"
-
-          sp.write_text(ss, encoding="utf-8")
-          print("patched", sp)
-
-          sp = Path("builder/setup.py")
-          ss = sp.read_text(encoding="utf-8")
-          if 'if not found and "gapi" not in relpath_re:' in ss:
-            ss = ss.replace(
-              'if not found and "gapi" not in relpath_re:',
-              'if not found and "gapi" not in relpath_re and not ("ios" in sysconfig.get_platform() and relpath_re.startswith("python/cv2/")):',
-              1,
-            )
-
-          fallback_marker = 'print("Copying files from non-default sourcetree locations")'
-          if fallback_marker in ss and "fallback copy for iOS cv2 files" not in ss:
-            fallback_code = '''
-        # fallback copy for iOS cv2 files: regex-based discovery may miss cross-compile layouts
-        if "ios" in sysconfig.get_platform():
-            import fnmatch
-            copied_any = False
-            for root, _, files in os.walk(cmake_install_dir):
-                for fname in files:
-                    rel = os.path.relpath(os.path.join(root, fname), cmake_install_dir).replace(os.path.sep, "/")
-                    if not (
-                        fnmatch.fnmatch(rel, "python/cv2/**/cv2*.so")
-                        or fnmatch.fnmatch(rel, "python/cv2/**/cv2*.dylib")
-                        or fnmatch.fnmatch(rel, "python/cv2/**/__init__.py")
-                        or (rel.startswith("python/cv2/") and "config" in os.path.basename(rel) and rel.endswith(".py"))
-                    ):
-                        continue
-                    new_install_relpath = os.path.join("cv2", os.path.basename(rel))
-                    cls._setuptools_wrap._copy_file(
-                        os.path.join(cmake_install_dir, rel.replace("/", os.path.sep)),
-                        os.path.join(cmake_install_dir, new_install_relpath),
-                        hide_listing=False,
-                    )
-                    final_install_relpaths.append(new_install_relpath)
-                    copied_any = True
-            if not copied_any:
-                print("WARNING: iOS fallback copy found no cv2 files in", cmake_install_dir)
-'''
-            ss = ss.replace(fallback_marker, fallback_code + "\n        " + fallback_marker, 1)
-            sp.write_text(ss, encoding="utf-8")
-            print("patched missing-path rule in", sp)
-          PY
+          git clone https://github.com/Py-Swift/opencv-python-old.git builder
+          cd builder
+          git checkout 0745eb8f88032c65530734db2ef382afa4533a00
+          git submodule update --init --recursive
 
       - name: Build iOS wheel via cibuildwheel
         shell: bash
@@ -146,100 +59,13 @@ jobs:
           python -m cibuildwheel --platform ios --output-dir wheelhouse
           ls -lah wheelhouse
 
-      - name: Repair wheel layout for cv2 import
-        shell: bash
-        run: |
-          set -euxo pipefail
-          WHEEL_FILE="$(ls -1 builder/wheelhouse/*.whl | head -n 1)"
-          python - <<'PY' "${WHEEL_FILE}"
-          import io
-          import os
-          import re
-          import sys
-          import zipfile
-          from pathlib import Path
-
-          wheel = Path(sys.argv[1])
-          tmp_wheel = wheel.with_suffix(".repaired.whl")
-
-          with zipfile.ZipFile(wheel, "r") as zin:
-            names = zin.namelist()
-            cv2_ext_anywhere = [n for n in names if re.search(r"(^|/)cv2[^/]*\.(so|dylib)$", n)]
-
-            with zipfile.ZipFile(tmp_wheel, "w", compression=zipfile.ZIP_DEFLATED) as zout:
-              has_init = False
-              has_root_cv2_ext = False
-              for info in zin.infolist():
-                data = zin.read(info.filename)
-                out_name = info.filename
-
-                m = re.match(r"^python/cv2/(?:python-[^/]+/)?(cv2[^/]*\.(?:so|dylib))$", info.filename)
-                if m:
-                  out_name = f"cv2/{m.group(1)}"
-                  has_root_cv2_ext = True
-
-                if re.match(r"^python/cv2/.*config.*\.py$", info.filename):
-                  out_name = f"cv2/{os.path.basename(info.filename)}"
-
-                if info.filename == "python/cv2/__init__.py":
-                  out_name = "cv2/__init__.py"
-                  has_init = True
-
-                zinfo = zipfile.ZipInfo(out_name, date_time=info.date_time)
-                zinfo.compress_type = zipfile.ZIP_DEFLATED
-                zinfo.external_attr = info.external_attr
-                zout.writestr(zinfo, data)
-
-              if not has_root_cv2_ext:
-                import glob
-                candidates = []
-                candidates.extend(glob.glob("builder/_skbuild/**/cmake-install/python/cv2/python-*/cv2*.so", recursive=True))
-                candidates.extend(glob.glob("builder/_skbuild/**/cmake-install/python/cv2/python-*/cv2*.dylib", recursive=True))
-                candidates.extend(glob.glob("builder/_skbuild/**/cmake-build/**/cv2*.so", recursive=True))
-                candidates.extend(glob.glob("builder/_skbuild/**/cmake-build/**/cv2*.dylib", recursive=True))
-                candidates = [c for c in candidates if os.path.isfile(c)]
-                if candidates:
-                  ext_src = candidates[0]
-                  with open(ext_src, "rb") as f:
-                    zout.writestr(f"cv2/{os.path.basename(ext_src)}", f.read())
-                  has_root_cv2_ext = True
-                  print("injected cv2 extension from:", ext_src)
-
-              if not has_init:
-                zout.writestr("cv2/__init__.py", "from .cv2 import *\n")
-
-              if not has_root_cv2_ext:
-                print("No cv2 extension found in wheel or _skbuild outputs")
-                raise SystemExit(1)
-
-          tmp_wheel.replace(wheel)
-          print("repaired wheel:", wheel)
-          PY
-
-      - name: Validate wheel has cv2 extension
-        shell: bash
-        run: |
-          set -euxo pipefail
-          WHEEL_FILE="$(ls -1 builder/wheelhouse/*.whl | head -n 1)"
-          python - <<'PY' "${WHEEL_FILE}"
-          import sys, zipfile
-          wheel = sys.argv[1]
-          with zipfile.ZipFile(wheel) as zf:
-              names = zf.namelist()
-          has_cv2 = any(n.startswith("cv2/") and (n.endswith(".so") or n.endswith(".dylib")) for n in names)
-          print("wheel:", wheel)
-          print("has_cv2_ext:", has_cv2)
-          if not has_cv2:
-              raise SystemExit(1)
-          PY
-
       - name: Collect artifacts
         shell: bash
         run: |
           set -euxo pipefail
+          cp builder/wheelhouse/*.whl opencv-python-ios-cp314-arm64-iphoneos.whl
           mkdir -p artifacts
           cp -R builder/wheelhouse artifacts/
-          cp builder/wheelhouse/*.whl opencv-python-ios-cp314-arm64-iphoneos.whl
           tar -czf opencv-python-ios-cp314-arm64-iphoneos.tar.gz -C artifacts wheelhouse
 
       - name: Upload artifacts
