@@ -82,8 +82,18 @@ jobs:
               "os.makedirs(os.path.dirname(config_py), exist_ok=True)\n        " + needle,
               1,
             )
-            sp.write_text(ss, encoding="utf-8")
-            print("patched", sp)
+          if "opencv_init_path = os.path.join(cmake_install_dir, 'python', 'cv2', '__init__.py')" not in ss:
+            ss = ss.replace(
+              "opencv_init_config.write(custom_init_data)",
+              "opencv_init_config.write(custom_init_data)\n\n        opencv_init_path = os.path.join(cmake_install_dir, 'python', 'cv2', '__init__.py')\n        os.makedirs(os.path.dirname(opencv_init_path), exist_ok=True)\n        with open(opencv_init_path, 'w') as opencv_init_py:\n            opencv_init_py.write(custom_init_data)",
+              1,
+            )
+
+          if "patched marker" not in ss:
+            ss += "\n# patched marker\n"
+
+          sp.write_text(ss, encoding="utf-8")
+          print("patched", sp)
 
           sp = Path("builder/setup.py")
           ss = sp.read_text(encoding="utf-8")
