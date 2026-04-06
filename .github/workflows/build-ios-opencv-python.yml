@@ -166,6 +166,7 @@ jobs:
             -DBUILD_EXAMPLES=OFF
             -DBUILD_opencv_apps=OFF
             -DBUILD_opencv_dnn=OFF
+            -DBUILD_opencv_gapi=OFF
             -DBUILD_opencv_highgui=OFF
             -DBUILD_opencv_videoio=OFF
             -DBUILD_opencv_imgcodecs=OFF
