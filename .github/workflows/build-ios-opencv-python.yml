@@ -92,14 +92,21 @@ jobs:
           cpp_link_args = ['-arch', '${IOS_ARCH}', '-isysroot', '${SYSROOT}', '-target', '${TARGET_TRIPLE}']
           EOF
 
-          python numpy/vendored-meson/meson/meson.py setup numpy-build-${{ matrix.sdk }} numpy \
+          # NumPy 新版本可能不再包含 vendored-meson，做兼容处理
+          if [ -f "numpy/vendored-meson/meson/meson.py" ]; then
+            MESON_CMD=(python "numpy/vendored-meson/meson/meson.py")
+          else
+            MESON_CMD=(meson)
+          fi
+
+          "${MESON_CMD[@]}" setup numpy-build-${{ matrix.sdk }} numpy \
             --cross-file "${PWD}/numpy-ios.cross" \
             --prefix "${PWD}/numpy-install/${{ matrix.sdk }}" \
             -Dbuildtype=release \
             -Dallow-noblas=true
 
-          python numpy/vendored-meson/meson/meson.py compile -C numpy-build-${{ matrix.sdk }}
-          python numpy/vendored-meson/meson/meson.py install -C numpy-build-${{ matrix.sdk }}
+          "${MESON_CMD[@]}" compile -C numpy-build-${{ matrix.sdk }}
+          "${MESON_CMD[@]}" install -C numpy-build-${{ matrix.sdk }}
 
           NUMPY_INCLUDE_DIR="$(find "numpy-install/${{ matrix.sdk }}" -type d -path '*/site-packages/numpy/_core/include' -print -quit || true)"
           if [ -z "${NUMPY_INCLUDE_DIR}" ]; then
