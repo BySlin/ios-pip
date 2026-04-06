@@ -1,0 +1,204 @@
+name: build-ios-opencv-python
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-ios-opencv-python.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: iOS ${{ matrix.sdk }} / Python 3.14
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [iphoneos, iphonesimulator]
+
+    env:
+      OPENCV_VERSION: "4.13.0"
+      NUMPY_VERSION: "2.4.4"
+      IOS_DEPLOYMENT_TARGET: "15.0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install build dependencies
+        run: |
+          brew update
+          brew install cmake ninja pkg-config
+          python -m pip install --upgrade pip setuptools wheel meson ninja
+
+      - name: Fetch NumPy/OpenCV sources
+        run: |
+          git clone --depth=1 --branch "v${NUMPY_VERSION}" https://github.com/numpy/numpy.git
+          git clone --depth=1 --branch "${OPENCV_VERSION}" https://github.com/opencv/opencv.git
+          git clone --depth=1 --branch "${OPENCV_VERSION}" https://github.com/opencv/opencv_contrib.git
+
+      - name: Build iOS NumPy first
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          SDK="${{ matrix.sdk }}"
+          IOS_ARCH=arm64
+          SYSROOT="$(xcrun --sdk "${SDK}" --show-sdk-path)"
+          CC="$(xcrun --sdk "${SDK}" --find clang)"
+          CXX="$(xcrun --sdk "${SDK}" --find clang++)"
+          AR="$(xcrun --sdk "${SDK}" --find ar)"
+          RANLIB="$(xcrun --sdk "${SDK}" --find ranlib)"
+          STRIP="$(xcrun --sdk "${SDK}" --find strip)"
+
+          if [ "${SDK}" = "iphonesimulator" ]; then
+            TARGET_TRIPLE="arm64-apple-ios${IOS_DEPLOYMENT_TARGET}-simulator"
+          else
+            TARGET_TRIPLE="arm64-apple-ios${IOS_DEPLOYMENT_TARGET}"
+          fi
+
+          # NumPy(2.x) 使用 Meson 构建；这里通过 cross file 交叉编译 iOS 产物
+          cat > numpy-ios.cross <<EOF
+          [binaries]
+          c = '${CC}'
+          cpp = '${CXX}'
+          ar = '${AR}'
+          ranlib = '${RANLIB}'
+          strip = '${STRIP}'
+          pkgconfig = 'pkg-config'
+
+          [host_machine]
+          system = 'darwin'
+          cpu_family = 'aarch64'
+          cpu = 'arm64'
+          endian = 'little'
+
+          [properties]
+          needs_exe_wrapper = true
+
+          [built-in options]
+          c_args = ['-arch', '${IOS_ARCH}', '-isysroot', '${SYSROOT}', '-target', '${TARGET_TRIPLE}']
+          cpp_args = ['-arch', '${IOS_ARCH}', '-isysroot', '${SYSROOT}', '-target', '${TARGET_TRIPLE}']
+          c_link_args = ['-arch', '${IOS_ARCH}', '-isysroot', '${SYSROOT}', '-target', '${TARGET_TRIPLE}']
+          cpp_link_args = ['-arch', '${IOS_ARCH}', '-isysroot', '${SYSROOT}', '-target', '${TARGET_TRIPLE}']
+          EOF
+
+          python numpy/vendored-meson/meson/meson.py setup numpy-build-${{ matrix.sdk }} numpy \
+            --cross-file "${PWD}/numpy-ios.cross" \
+            --prefix "${PWD}/numpy-install/${{ matrix.sdk }}" \
+            -Dbuildtype=release \
+            -Dallow-noblas=true
+
+          python numpy/vendored-meson/meson/meson.py compile -C numpy-build-${{ matrix.sdk }}
+          python numpy/vendored-meson/meson/meson.py install -C numpy-build-${{ matrix.sdk }}
+
+          NUMPY_INCLUDE_DIR="$(find "numpy-install/${{ matrix.sdk }}" -type d -path '*/site-packages/numpy/_core/include' -print -quit || true)"
+          if [ -z "${NUMPY_INCLUDE_DIR}" ]; then
+            NUMPY_INCLUDE_DIR="$(find "numpy-install/${{ matrix.sdk }}" -type d -path '*/site-packages/numpy/core/include' -print -quit || true)"
+          fi
+          if [ -z "${NUMPY_INCLUDE_DIR}" ]; then
+            echo "NumPy include directory not found" >&2
+            exit 1
+          fi
+
+          NUMPY_SITE_PACKAGES_DIR="$(find "numpy-install/${{ matrix.sdk }}" -type d -path '*/site-packages' -print -quit || true)"
+          if [ -z "${NUMPY_SITE_PACKAGES_DIR}" ]; then
+            echo "NumPy site-packages directory not found" >&2
+            exit 1
+          fi
+
+          echo "NUMPY_INCLUDE_DIR=${NUMPY_INCLUDE_DIR}" >> "${GITHUB_ENV}"
+          echo "NUMPY_SITE_PACKAGES_DIR=${NUMPY_SITE_PACKAGES_DIR}" >> "${GITHUB_ENV}"
+
+      - name: Configure and build OpenCV Python binding for iOS
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          # iOS 模拟器和真机都使用 arm64，便于后续统一打包
+          IOS_ARCH=arm64
+
+          # Python 3.14 主机解释器用于生成绑定代码；目标产物为 iOS 平台可加载模块
+          PYTHON_BIN="$(python -c 'import sys; print(sys.executable)')"
+          PYTHON_INCLUDE_DIR="$(python -c 'import sysconfig; print(sysconfig.get_paths()[\"include\"])')"
+          PYTHON_LIB="$(python - <<'PY'
+          import os
+          import sysconfig
+          libdir = sysconfig.get_config_var("LIBDIR") or ""
+          ldlib = sysconfig.get_config_var("LDLIBRARY") or ""
+          print(os.path.join(libdir, ldlib) if libdir and ldlib else "")
+          PY
+          )"
+          CMAKE_ARGS=(
+            -DOPENCV_EXTRA_MODULES_PATH="${PWD}/opencv_contrib/modules"
+            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_INSTALL_PREFIX="${PWD}/install/${{ matrix.sdk }}"
+            -DCMAKE_SYSTEM_NAME=iOS
+            -DCMAKE_OSX_SYSROOT="${{ matrix.sdk }}"
+            -DCMAKE_OSX_ARCHITECTURES="${IOS_ARCH}"
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET}"
+            -DBUILD_SHARED_LIBS=ON
+            -DBUILD_TESTS=OFF
+            -DBUILD_PERF_TESTS=OFF
+            -DBUILD_EXAMPLES=OFF
+            -DBUILD_opencv_apps=OFF
+            -DBUILD_opencv_java=OFF
+            -DBUILD_opencv_js=OFF
+            -DBUILD_opencv_python2=OFF
+            -DBUILD_opencv_python3=ON
+            -DPYTHON3_EXECUTABLE="${PYTHON_BIN}"
+            -DPYTHON3_INCLUDE_DIR="${PYTHON_INCLUDE_DIR}"
+            -DPYTHON3_NUMPY_INCLUDE_DIRS="${NUMPY_INCLUDE_DIR}"
+            -DPYTHON3_PACKAGES_PATH="${NUMPY_SITE_PACKAGES_DIR}"
+          )
+
+          # 某些 Python 3.14 分发版不暴露可链接的 libpython，存在时再传入
+          if [ -n "${PYTHON_LIB}" ] && [ -f "${PYTHON_LIB}" ]; then
+            CMAKE_ARGS+=(-DPYTHON3_LIBRARY="${PYTHON_LIB}")
+          fi
+
+          cmake -S opencv -B build-${{ matrix.sdk }} -G Ninja "${CMAKE_ARGS[@]}"
+
+          cmake --build build-${{ matrix.sdk }} --config Release -j"$(sysctl -n hw.logicalcpu)"
+          cmake --install build-${{ matrix.sdk }} --config Release
+
+      - name: Pack artifacts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT_DIR="artifacts/${{ matrix.sdk }}"
+          mkdir -p "${OUT_DIR}"
+
+          # 收集 iOS NumPy 构建产物
+          if [ -d "numpy-install/${{ matrix.sdk }}" ]; then
+            cp -R "numpy-install/${{ matrix.sdk }}" "${OUT_DIR}/numpy"
+          fi
+
+          # 收集 Python cv2 扩展和 OpenCV 依赖库
+          if [ -d "install/${{ matrix.sdk }}/lib/python3" ]; then
+            cp -R "install/${{ matrix.sdk }}/lib/python3" "${OUT_DIR}/"
+          fi
+          if [ -d "install/${{ matrix.sdk }}/lib" ]; then
+            cp -R "install/${{ matrix.sdk }}/lib" "${OUT_DIR}/lib"
+          fi
+          if [ -d "install/${{ matrix.sdk }}/include" ]; then
+            cp -R "install/${{ matrix.sdk }}/include" "${OUT_DIR}/include"
+          fi
+
+          tar -czf "opencv-python-ios-${{ matrix.sdk }}-py314.tar.gz" -C artifacts "${{ matrix.sdk }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencv-python-ios-${{ matrix.sdk }}-py314
+          path: opencv-python-ios-${{ matrix.sdk }}-py314.tar.gz
+          if-no-files-found: error
