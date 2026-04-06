@@ -93,7 +93,7 @@ jobs:
           if 'if not found and "gapi" not in relpath_re:' in s:
             s = s.replace(
               'if not found and "gapi" not in relpath_re:',
-              'if not found and "gapi" not in relpath_re and not ("ios" in sysconfig.get_platform() and (relpath_re.startswith("python/cv2/python-") or relpath_re == "python/cv2/__init__.py")):',
+              'if not found and "gapi" not in relpath_re and not ("ios" in sysconfig.get_platform() and relpath_re.startswith("python/cv2/")):',
               1,
             )
           p.write_text(s, encoding="utf-8")
