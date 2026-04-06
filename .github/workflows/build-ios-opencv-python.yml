@@ -158,11 +158,7 @@ jobs:
           s = p.read_text(encoding="utf-8")
           helper = "template<typename T> static inline void pyopencv_destroy_at(T* p) { p->~T(); }\n"
           if "pyopencv_destroy_at(" not in s:
-            s = s.replace(
-              "\n\n#define CV_UNUSED(name) (void)name\n",
-              "\n\n#define CV_UNUSED(name) (void)name\n\n" + helper,
-              1
-            )
+            s = helper + s
             s = s.replace(
               "((pyopencv_##CLASS_ID##_t*)self)->v.STORAGE::~SNAME(); \\",
               "pyopencv_destroy_at(&((pyopencv_##CLASS_ID##_t*)self)->v); \\",
@@ -227,6 +223,18 @@ jobs:
           s = open(p, "r", encoding="utf-8").read()
           for name in ("Point", "Point2f", "Rect", "Rect2f", "Size", "Size2f"):
             s = re.sub(rf"(?<!:)\b{name}\b", f"cv::{name}", s)
+          open(p, "w", encoding="utf-8").write(s)
+          PY
+          fi
+
+          GENERATED_TYPES_HEADER="$(find "build-${{ matrix.sdk }}" -type f -name 'pyopencv_generated_types.h' -print -quit || true)"
+          if [ -n "${GENERATED_TYPES_HEADER}" ] && [ -f "${GENERATED_TYPES_HEADER}" ]; then
+            python - <<'PY' "${GENERATED_TYPES_HEADER}"
+          import re
+          import sys
+          p = sys.argv[1]
+          s = open(p, "r", encoding="utf-8").read()
+          s = re.sub(r"(?<!:)\bPtr<", "cv::Ptr<", s)
           open(p, "w", encoding="utf-8").write(s)
           PY
           fi
