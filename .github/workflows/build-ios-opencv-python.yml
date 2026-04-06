@@ -278,7 +278,9 @@ jobs:
             python setup.py bdist_wheel --python-tag cp314 --plat-name ios_15_0_arm64
           )
 
-          cp "${PKG_ROOT}"/dist/*.whl "${OUT_DIR}/"
+          WHEEL_FILE="$(ls -1 "${PKG_ROOT}"/dist/*.whl | head -n 1)"
+          cp "${WHEEL_FILE}" "${OUT_DIR}/"
+          cp "${WHEEL_FILE}" "opencv-python-ios-${{ matrix.sdk }}-py314.whl"
           tar -czf "opencv-python-ios-${{ matrix.sdk }}-py314.tar.gz" -C artifacts "${{ matrix.sdk }}"
 
       - name: Upload artifacts
@@ -287,5 +289,6 @@ jobs:
           name: opencv-python-ios-${{ matrix.sdk }}-py314
           path: |
             opencv-python-ios-${{ matrix.sdk }}-py314.tar.gz
+            opencv-python-ios-${{ matrix.sdk }}-py314.whl
             artifacts/${{ matrix.sdk }}/*.whl
           if-no-files-found: error
