@@ -107,6 +107,19 @@ jobs:
             print("patched missing-path rule in", sp)
           PY
 
+      - name: Prepare NumPy headers for OpenCV Python build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf builder-numpy
+          git clone --depth=1 --branch v2.4.4 https://github.com/numpy/numpy.git builder-numpy
+          NUMPY_INCLUDE_DIR="${PWD}/builder-numpy/numpy/_core/include"
+          if [ ! -d "${NUMPY_INCLUDE_DIR}" ]; then
+            NUMPY_INCLUDE_DIR="${PWD}/builder-numpy/numpy/core/include"
+          fi
+          test -d "${NUMPY_INCLUDE_DIR}"
+          echo "CMAKE_ARGS=-DOPENCV_PYTHON_SKIP_DETECTION=ON -DPYTHON3_NUMPY_INCLUDE_DIRS=${NUMPY_INCLUDE_DIR}" >> "${GITHUB_ENV}"
+
       - name: Build iOS wheel via cibuildwheel
         shell: bash
         run: |
