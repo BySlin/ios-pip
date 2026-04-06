@@ -194,7 +194,7 @@ jobs:
           cmake -S opencv -B build-${{ matrix.sdk }} -G Ninja "${CMAKE_ARGS[@]}"
 
           # 先生成 Python 绑定代码，再做定向修补，避免 iOS SDK 同名类型冲突
-          cmake --build build-${{ matrix.sdk }} --config Release --target opencv_python_bindings_generator -j"$(sysctl -n hw.logicalcpu)"
+          cmake --build build-${{ matrix.sdk }} --config Release --target gen_opencv_python_source -j"$(sysctl -n hw.logicalcpu)"
 
           GENERATED_TYPES_FILE="$(find "build-${{ matrix.sdk }}" -type f -name 'pyopencv_generated_types_content.h' -print -quit || true)"
           if [ -n "${GENERATED_TYPES_FILE}" ] && [ -f "${GENERATED_TYPES_FILE}" ]; then
