@@ -149,6 +149,11 @@ jobs:
           print(os.path.join(libdir, ldlib) if libdir and ldlib else "")
           PY
           )"
+
+          # iOS SDK 的 MacTypes 定义了全局 Ptr，和 OpenCV Python 绑定生成代码冲突。
+          # 这里把析构调用从 SNAME 改为 STORAGE，避免 Ptr 歧义。
+          sed -i.bak 's/->v\.STORAGE::~SNAME();/->v.STORAGE::~STORAGE();/' opencv/modules/python/src2/pycompat.hpp
+
           CMAKE_ARGS=(
             -DOPENCV_EXTRA_MODULES_PATH="${PWD}/opencv_contrib/modules"
             -DCMAKE_BUILD_TYPE=Release
