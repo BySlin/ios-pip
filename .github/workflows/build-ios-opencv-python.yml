@@ -87,13 +87,12 @@ jobs:
 
           sp = Path("builder/setup.py")
           ss = sp.read_text(encoding="utf-8")
-          old = """                    if not found and "gapi" not in relpath_re:
-                        raise Exception("Not found: '%s'" % relpath_re)"""
-          new = """                    is_ios_runtime = "ios" in sysconfig.get_platform()
-                    if not found and "gapi" not in relpath_re and not (is_ios_runtime and relpath_re.startswith("python/cv2/python-")):
-                        raise Exception("Not found: '%s'" % relpath_re)"""
-          if old in ss:
-            ss = ss.replace(old, new, 1)
+          if 'if not found and "gapi" not in relpath_re:' in ss:
+            ss = ss.replace(
+              'if not found and "gapi" not in relpath_re:',
+              'if not found and "gapi" not in relpath_re and not ("ios" in sysconfig.get_platform() and relpath_re.startswith("python/cv2/python-")):',
+              1,
+            )
             sp.write_text(ss, encoding="utf-8")
             print("patched missing-path rule in", sp)
           PY
