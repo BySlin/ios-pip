@@ -41,6 +41,23 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --upgrade "cibuildwheel>=2.20.0" "numpy>=2.0.0"
 
+      - name: Build NumPy iOS wheel (cp314 arm64 iphoneos)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf numpy-builder numpy-wheelhouse
+          git clone --depth=1 --branch v2.4.4 https://github.com/numpy/numpy.git numpy-builder
+          mkdir -p numpy-wheelhouse
+          (
+            cd numpy-builder
+            CIBW_PLATFORM=ios \
+            CIBW_BUILD=cp314-ios_arm64_iphoneos \
+            CIBW_ARCHS=arm64_iphoneos \
+            CIBW_BUILD_VERBOSITY=2 \
+            python -m cibuildwheel --platform ios --output-dir "${GITHUB_WORKSPACE}/numpy-wheelhouse"
+          )
+          ls -lah numpy-wheelhouse
+
       - name: Clone fixed upstream commit
         shell: bash
         run: |
@@ -148,9 +165,12 @@ jobs:
         run: |
           set -euxo pipefail
           cp builder/wheelhouse/*.whl opencv-python-ios-cp314-arm64-iphoneos.whl
+          cp numpy-wheelhouse/*.whl numpy-ios-cp314-arm64-iphoneos.whl
           mkdir -p artifacts
           cp -R builder/wheelhouse artifacts/
+          cp -R numpy-wheelhouse artifacts/
           tar -czf opencv-python-ios-cp314-arm64-iphoneos.tar.gz -C artifacts wheelhouse
+          tar -czf numpy-ios-cp314-arm64-iphoneos.tar.gz -C artifacts numpy-wheelhouse
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -159,5 +179,8 @@ jobs:
           path: |
             opencv-python-ios-cp314-arm64-iphoneos.whl
             opencv-python-ios-cp314-arm64-iphoneos.tar.gz
+            numpy-ios-cp314-arm64-iphoneos.whl
+            numpy-ios-cp314-arm64-iphoneos.tar.gz
             artifacts/wheelhouse/*.whl
+            artifacts/numpy-wheelhouse/*.whl
           if-no-files-found: error
