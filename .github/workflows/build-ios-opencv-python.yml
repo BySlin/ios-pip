@@ -173,6 +173,17 @@ jobs:
           for name in ("Point", "Point2f", "Size", "Rect"):
             c = re.sub(rf"(?<!:)\b{name}\b", f"cv::{name}", c)
           cv2cpp.write_text(c, encoding="utf-8")
+
+          cv2convert = Path("opencv/modules/python/src2/cv2_convert.cpp")
+          cc = cv2convert.read_text(encoding="utf-8")
+          for name in ("Point", "Point2f", "Size", "Rect", "Ptr"):
+            cc = re.sub(rf"(?<!:)\b{name}\b", f"cv::{name}", cc)
+          cv2convert.write_text(cc, encoding="utf-8")
+
+          py_async = Path("opencv/modules/core/misc/python/pyopencv_async.hpp")
+          pa = py_async.read_text(encoding="utf-8")
+          pa = re.sub(r"(?<!:)\bPtr<", "cv::Ptr<", pa)
+          py_async.write_text(pa, encoding="utf-8")
           PY
 
           CMAKE_ARGS=(
@@ -184,6 +195,7 @@ jobs:
             -DCMAKE_OSX_SYSROOT="${{ matrix.sdk }}"
             -DCMAKE_OSX_ARCHITECTURES="${IOS_ARCH}"
             -DCMAKE_OSX_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET}"
+            -DOPENCV_EXTRA_CXX_FLAGS="-I${PWD}/opencv/3rdparty/dlpack/include"
             -DCMAKE_SHARED_LINKER_FLAGS="-framework Foundation -framework CoreFoundation -framework CoreGraphics -framework QuartzCore -framework UIKit"
             -DCMAKE_MODULE_LINKER_FLAGS="-framework Foundation -framework CoreFoundation -framework CoreGraphics -framework QuartzCore -framework UIKit"
             -DBUILD_SHARED_LIBS=ON
