@@ -97,6 +97,8 @@ jobs:
           NUMPY_SITE_PACKAGES_DIR="$(find numpy-install/iphoneos -type d -path '*/site-packages' -print -quit || true)"
           test -n "${NUMPY_INCLUDE_DIR}"
           test -n "${NUMPY_SITE_PACKAGES_DIR}"
+          NUMPY_INCLUDE_DIR="$(python -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "${NUMPY_INCLUDE_DIR}")"
+          NUMPY_SITE_PACKAGES_DIR="$(python -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "${NUMPY_SITE_PACKAGES_DIR}")"
           echo "NUMPY_INCLUDE_DIR=${NUMPY_INCLUDE_DIR}" >> "${GITHUB_ENV}"
           echo "NUMPY_SITE_PACKAGES_DIR=${NUMPY_SITE_PACKAGES_DIR}" >> "${GITHUB_ENV}"
 
