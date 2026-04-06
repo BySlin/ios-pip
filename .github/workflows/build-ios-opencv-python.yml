@@ -184,6 +184,22 @@ jobs:
           ):
               qualify_basic_types(Path(f))
 
+          cv2cpp = Path("opencv/modules/python/src2/cv2.cpp")
+          if cv2cpp.exists():
+              c = cv2cpp.read_text(encoding="utf-8")
+              marker = "#define Rect cv::Rect"
+              if marker not in c:
+                  block = (
+                      "using namespace cv;\n\n"
+                      "#define Ptr cv::Ptr\n"
+                      "#define Point cv::Point\n"
+                      "#define Point2f cv::Point2f\n"
+                      "#define Size cv::Size\n"
+                      "#define Rect cv::Rect\n"
+                  )
+                  c = c.replace("using namespace cv;\n", block, 1)
+                  cv2cpp.write_text(c, encoding="utf-8")
+
           pycompat = Path("opencv/modules/python/src2/pycompat.hpp")
           if pycompat.exists():
               s = pycompat.read_text(encoding="utf-8")
@@ -204,10 +220,7 @@ jobs:
           import re
           from pathlib import Path
           gen_dir = Path("build-iphoneos/modules/python_bindings_generator")
-          for name in ("pyopencv_generated_types.h", "pyopencv_generated_types_content.h"):
-              p = gen_dir / name
-              if not p.exists():
-                  continue
+          for p in gen_dir.glob("pyopencv_generated_*.h"):
               s = p.read_text(encoding="utf-8")
               for t in ("Point", "Point2f", "Size", "Rect"):
                   s = re.sub(rf"(?<!:)\b{t}\b", f"cv::{t}", s)
