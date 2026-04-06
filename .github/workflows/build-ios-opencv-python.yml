@@ -184,21 +184,20 @@ jobs:
           ):
               qualify_basic_types(Path(f))
 
+          # 清理历史版本可能写入的冲突宏，避免出现 cv::cv::Point
           cv2cpp = Path("opencv/modules/python/src2/cv2.cpp")
           if cv2cpp.exists():
               c = cv2cpp.read_text(encoding="utf-8")
-              marker = "#define Rect cv::Rect"
-              if marker not in c:
-                  block = (
-                      "using namespace cv;\n\n"
-                      "#define Ptr cv::Ptr\n"
-                      "#define Point cv::Point\n"
-                      "#define Point2f cv::Point2f\n"
-                      "#define Size cv::Size\n"
-                      "#define Rect cv::Rect\n"
-                  )
-                  c = c.replace("using namespace cv;\n", block, 1)
-                  cv2cpp.write_text(c, encoding="utf-8")
+              for bad in (
+                  "#define Ptr cv::Ptr\n",
+                  "#define Point cv::Point\n",
+                  "#define Point2f cv::Point2f\n",
+                  "#define Size cv::Size\n",
+                  "#define Rect cv::Rect\n",
+              ):
+                  c = c.replace(bad, "")
+              c = c.replace("using namespace cv;\n\n\n", "using namespace cv;\n\n")
+              cv2cpp.write_text(c, encoding="utf-8")
 
           pycompat = Path("opencv/modules/python/src2/pycompat.hpp")
           if pycompat.exists():
