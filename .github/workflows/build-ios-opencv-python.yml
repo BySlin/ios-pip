@@ -150,9 +150,24 @@ jobs:
           PY
           )"
 
-          # iOS SDK 的 MacTypes 定义了全局 Ptr，和 OpenCV Python 绑定生成代码冲突。
-          # 这里把析构调用从 SNAME 改为 STORAGE，避免 Ptr 歧义。
-          sed -i.bak 's/->v\.STORAGE::~SNAME();/->v.STORAGE::~STORAGE();/' opencv/modules/python/src2/pycompat.hpp
+          # iOS SDK 的 MacTypes 定义了全局 Ptr，这里在生成头包含阶段给 Ptr 做别名规避冲突。
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("opencv/modules/python/src2/cv2.cpp")
+          s = p.read_text(encoding="utf-8")
+          if "using CVPTR = cv::Ptr<T>;" not in s:
+            s = s.replace(
+              '#include "pyopencv_generated_enums.h"\n',
+              '#include "pyopencv_generated_enums.h"\n\ntemplate <typename T> using CVPTR = cv::Ptr<T>;\n#define Ptr CVPTR\n',
+              1
+            )
+            s = s.replace(
+              '#include "pyopencv_generated_types.h"\n#undef CVPY_TYPE',
+              '#include "pyopencv_generated_types.h"\n#undef Ptr\n#undef CVPY_TYPE',
+              1
+            )
+            p.write_text(s, encoding="utf-8")
+          PY
 
           CMAKE_ARGS=(
             -DOPENCV_EXTRA_MODULES_PATH="${PWD}/opencv_contrib/modules"
@@ -208,7 +223,7 @@ jobs:
           import sys
           p = sys.argv[1]
           s = open(p, "r", encoding="utf-8").read()
-          for name in ("Point", "Point2f", "Rect", "Rect2f", "Size", "Size2f", "Ptr"):
+          for name in ("Point", "Point2f", "Rect", "Rect2f", "Size", "Size2f"):
             s = re.sub(rf"(?<!:)\b{name}\b", f"cv::{name}", s)
           open(p, "w", encoding="utf-8").write(s)
           PY
