@@ -94,12 +94,10 @@ jobs:
           cpp_link_args = ['-arch', '${IOS_ARCH}', '-isysroot', '${SYSROOT}', '-target', '${TARGET_TRIPLE}']
           EOF
 
-          # NumPy 新版本可能不再包含 vendored-meson，做兼容处理
-          if [ -f "numpy/vendored-meson/meson/meson.py" ]; then
-            MESON_CMD=(python "numpy/vendored-meson/meson/meson.py")
-          else
-            MESON_CMD=(meson)
-          fi
+          # 强制使用系统 meson（pip 安装的新版本），避免 numpy vendored 版本过旧
+          MESON_CMD=(meson)
+          command -v "${MESON_CMD[0]}"
+          "${MESON_CMD[@]}" --version
 
           "${MESON_CMD[@]}" setup numpy-build-${{ matrix.sdk }} numpy \
             --cross-file "${PWD}/numpy-ios.cross" \
