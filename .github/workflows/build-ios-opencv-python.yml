@@ -150,20 +150,22 @@ jobs:
           PY
           )"
 
-          # iOS SDK 的 MacTypes 定义了全局 Ptr，这里在生成头包含阶段给 Ptr 做别名规避冲突。
+          # iOS SDK 的 MacTypes 定义了全局 Ptr，和绑定代码中的 SNAME=Ptr 冲突。
+          # 这里把析构调用改为模板函数，避免依赖 SNAME 的文本名。
           python - <<'PY'
           from pathlib import Path
-          p = Path("opencv/modules/python/src2/cv2.cpp")
+          p = Path("opencv/modules/python/src2/pycompat.hpp")
           s = p.read_text(encoding="utf-8")
-          if "using CVPTR = cv::Ptr<T>;" not in s:
+          helper = "template<typename T> static inline void pyopencv_destroy_at(T* p) { p->~T(); }\n"
+          if "pyopencv_destroy_at(" not in s:
             s = s.replace(
-              '#include "pyopencv_generated_enums.h"\n',
-              '#include "pyopencv_generated_enums.h"\n\ntemplate <typename T> using CVPTR = cv::Ptr<T>;\n#define Ptr CVPTR\n',
+              "\n\n#define CV_UNUSED(name) (void)name\n",
+              "\n\n#define CV_UNUSED(name) (void)name\n\n" + helper,
               1
             )
             s = s.replace(
-              '#include "pyopencv_generated_types.h"\n#undef CVPY_TYPE',
-              '#include "pyopencv_generated_types.h"\n#undef Ptr\n#undef CVPY_TYPE',
+              "((pyopencv_##CLASS_ID##_t*)self)->v.STORAGE::~SNAME(); \\",
+              "pyopencv_destroy_at(&((pyopencv_##CLASS_ID##_t*)self)->v); \\",
               1
             )
             p.write_text(s, encoding="utf-8")
