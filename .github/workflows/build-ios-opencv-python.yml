@@ -206,11 +206,86 @@ jobs:
             cp -R "install/${{ matrix.sdk }}/include" "${OUT_DIR}/include"
           fi
 
+          # 额外打一个可分发的 wheel（iOS 平台 tag）
+          WHEEL_ROOT="${PWD}/wheel-build"
+          PKG_ROOT="${WHEEL_ROOT}/opencv_python_ios"
+          rm -rf "${WHEEL_ROOT}"
+          mkdir -p "${PKG_ROOT}/cv2/.dylibs"
+
+          CV2_SRC_DIR="$(find "install/${{ matrix.sdk }}" -type d -path '*/site-packages/cv2' -print -quit || true)"
+          if [ -n "${CV2_SRC_DIR}" ] && [ -d "${CV2_SRC_DIR}" ]; then
+            cp -R "${CV2_SRC_DIR}/." "${PKG_ROOT}/cv2/"
+          fi
+
+          # 某些布局下 cv2 是单个扩展文件，兜底复制到包目录
+          CV2_EXT="$(find "install/${{ matrix.sdk }}" -type f \( -name 'cv2*.so' -o -name 'cv2*.dylib' \) -print -quit || true)"
+          if [ -n "${CV2_EXT}" ]; then
+            cp "${CV2_EXT}" "${PKG_ROOT}/cv2/"
+          fi
+
+          if [ ! -f "${PKG_ROOT}/cv2/__init__.py" ]; then
+            cat > "${PKG_ROOT}/cv2/__init__.py" <<'PY'
+          import importlib
+          import pathlib
+          import sys
+
+          _pkg_dir = pathlib.Path(__file__).resolve().parent
+          _dylib_dir = _pkg_dir / ".dylibs"
+          if _dylib_dir.exists():
+            sys.path.insert(0, str(_dylib_dir))
+
+          # 兼容 cv2 单文件扩展安装布局
+          try:
+            from .cv2 import *  # type: ignore
+          except Exception:
+            _ext = next(_pkg_dir.glob("cv2*.so"), None) or next(_pkg_dir.glob("cv2*.dylib"), None)
+            if _ext is None:
+              raise
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("cv2.cv2", _ext)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            spec.loader.exec_module(mod)
+            globals().update({k: getattr(mod, k) for k in dir(mod) if not k.startswith("_")})
+          PY
+          fi
+
+          # 附带 OpenCV dylib 依赖
+          find "install/${{ matrix.sdk }}/lib" -maxdepth 1 -type f -name "libopencv*.dylib" -exec cp {} "${PKG_ROOT}/cv2/.dylibs/" \;
+
+          cat > "${PKG_ROOT}/setup.py" <<'PY'
+          from setuptools import setup, find_packages
+
+          setup(
+              name="opencv-python-ios",
+              version="4.13.0.0",
+              description="OpenCV Python bindings for iOS",
+              packages=find_packages(),
+              include_package_data=True,
+              package_data={"cv2": ["*.so", "*.dylib", ".dylibs/*.dylib"]},
+              zip_safe=False,
+          )
+          PY
+
+          cat > "${PKG_ROOT}/pyproject.toml" <<'TOML'
+          [build-system]
+          requires = ["setuptools>=68", "wheel"]
+          build-backend = "setuptools.build_meta"
+          TOML
+
+          (
+            cd "${PKG_ROOT}"
+            python setup.py bdist_wheel --python-tag cp314 --plat-name ios_15_0_arm64
+          )
+
+          cp "${PKG_ROOT}"/dist/*.whl "${OUT_DIR}/"
           tar -czf "opencv-python-ios-${{ matrix.sdk }}-py314.tar.gz" -C artifacts "${{ matrix.sdk }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: opencv-python-ios-${{ matrix.sdk }}-py314
-          path: opencv-python-ios-${{ matrix.sdk }}-py314.tar.gz
+          path: |
+            opencv-python-ios-${{ matrix.sdk }}-py314.tar.gz
+            artifacts/${{ matrix.sdk }}/*.whl
           if-no-files-found: error
