@@ -161,6 +161,49 @@ jobs:
           print("renamed:", renamed)
           PY
 
+      - name: Convert NumPy extensions to iOS frameworks
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          import re
+          import shutil
+          from pathlib import Path
+
+          root = Path("numpy-install/iphoneos")
+          site = root / "lib" / "python3.14" / "site-packages"
+          fw_root = root / "Frameworks"
+          fw_root.mkdir(parents=True, exist_ok=True)
+
+          converted = 0
+          for so in site.rglob("*.so"):
+            if "cpython-314-ios" not in so.name:
+              continue
+            rel = so.relative_to(site)
+            mod_base = re.sub(r"\.cpython-314-ios\.so$", "", so.name)
+            fullmod = ".".join(list(rel.parts[:-1]) + [mod_base])
+            framework_dir = fw_root / f"{fullmod}.framework"
+            framework_dir.mkdir(parents=True, exist_ok=True)
+            framework_bin = framework_dir / fullmod
+            shutil.copy2(so, framework_bin)
+
+            info = framework_dir / "Info.plist"
+            if not info.exists():
+              info.write_text(
+                """<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>CFBundlePackageType</key><string>FMWK</string><key>CFBundleExecutable</key><string>{name}</string><key>CFBundleIdentifier</key><string>org.python.extension.{name}</string></dict></plist>\n""".format(name=fullmod),
+                encoding="utf-8",
+              )
+
+            fwork = so.with_suffix(".fwork")
+            fwork.write_text(f"Frameworks/{fullmod}.framework/{fullmod}", encoding="utf-8")
+            origin = framework_dir / f"{fullmod}.origin"
+            origin.write_text(fwork.relative_to(root).as_posix(), encoding="utf-8")
+            so.unlink()
+            converted += 1
+
+          print("framework_converted:", converted)
+          PY
+
       - name: Validate NumPy iOS extension suffix
         shell: bash
         run: |
@@ -169,13 +212,17 @@ jobs:
           from pathlib import Path
           root = Path("numpy-install/iphoneos")
           bad = list(root.rglob("*cpython-314-darwin.*"))
-          good = list(root.rglob("_multiarray_umath.cpython-314-ios.*"))
+          good = list(root.rglob("_multiarray_umath.cpython-314-ios.fwork"))
+          fw = list(root.rglob("numpy._core._multiarray_umath.framework/numpy._core._multiarray_umath"))
           print("numpy_bad_darwin_count:", len(bad))
-          print("numpy_multiarray_ios_count:", len(good))
+          print("numpy_multiarray_fwork_count:", len(good))
+          print("numpy_multiarray_framework_bin_count:", len(fw))
           if bad:
             raise SystemExit("still contains darwin.fwork binaries")
           if not good:
-            raise SystemExit("no ios-tagged _multiarray_umath binary found")
+            raise SystemExit("no ios-tagged _multiarray_umath fwork marker found")
+          if not fw:
+            raise SystemExit("no framework binary found for _multiarray_umath")
           PY
 
       - name: Patch setup.py config path for iOS packaging
