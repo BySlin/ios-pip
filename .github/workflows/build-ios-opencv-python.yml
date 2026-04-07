@@ -295,8 +295,16 @@ jobs:
           mkdir -p artifacts
           cp -R builder/wheelhouse artifacts/
           cp -R numpy-install/iphoneos artifacts/numpy-install-iphoneos
+
+          # Build a ready-to-merge Python package layout for iOS app bundles:
+          # app_packages/numpy + Frameworks/*
+          mkdir -p artifacts/numpy-ios-python-package/app_packages
+          cp -R numpy-install/iphoneos/lib/python3.14/site-packages/numpy artifacts/numpy-ios-python-package/app_packages/
+          cp -R numpy-install/iphoneos/Frameworks artifacts/numpy-ios-python-package/
+
           tar -czf opencv-python-ios-cp314-arm64-iphoneos.tar.gz -C artifacts wheelhouse
           tar -czf numpy-ios-arm64-iphoneos-install.tar.gz -C artifacts numpy-install-iphoneos
+          tar -czf numpy-ios-cp314-arm64-iphoneos-python-package.tar.gz -C artifacts numpy-ios-python-package
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -306,6 +314,8 @@ jobs:
             opencv-python-ios-cp314-arm64-iphoneos.whl
             opencv-python-ios-cp314-arm64-iphoneos.tar.gz
             numpy-ios-arm64-iphoneos-install.tar.gz
+            numpy-ios-cp314-arm64-iphoneos-python-package.tar.gz
             artifacts/wheelhouse/*.whl
             artifacts/numpy-install-iphoneos/**
+            artifacts/numpy-ios-python-package/**
           if-no-files-found: error
