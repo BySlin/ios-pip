@@ -145,6 +145,38 @@ jobs:
           test -d "${NUMPY_INCLUDE_DIR}"
           echo "CMAKE_ARGS=-DPYTHON3_NUMPY_INCLUDE_DIRS=${NUMPY_INCLUDE_DIR}" >> "${GITHUB_ENV}"
 
+      - name: Normalize NumPy iOS extension suffix
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          root = Path("numpy-install/iphoneos")
+          renamed = 0
+          for p in root.rglob("*.cpython-314-darwin.fwork"):
+            q = p.with_name(p.name.replace(".cpython-314-darwin.fwork", ".cpython-314-ios.fwork"))
+            p.rename(q)
+            renamed += 1
+          print("renamed:", renamed)
+          PY
+
+      - name: Validate NumPy iOS extension suffix
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          root = Path("numpy-install/iphoneos")
+          bad = list(root.rglob("*.cpython-314-darwin.fwork"))
+          good = list(root.rglob("*.cpython-314-ios.fwork"))
+          print("numpy_bad_darwin_count:", len(bad))
+          print("numpy_good_ios_count:", len(good))
+          if bad:
+            raise SystemExit("still contains darwin.fwork binaries")
+          if not good:
+            raise SystemExit("no ios.fwork numpy binary found")
+          PY
+
       - name: Patch setup.py config path for iOS packaging
         shell: bash
         run: |
