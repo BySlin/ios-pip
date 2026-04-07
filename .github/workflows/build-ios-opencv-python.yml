@@ -153,10 +153,11 @@ jobs:
           from pathlib import Path
           root = Path("numpy-install/iphoneos")
           renamed = 0
-          for p in root.rglob("*.cpython-314-darwin.fwork"):
-            q = p.with_name(p.name.replace(".cpython-314-darwin.fwork", ".cpython-314-ios.fwork"))
-            p.rename(q)
-            renamed += 1
+          for p in root.rglob("*cpython-314-darwin.*"):
+            q = p.with_name(p.name.replace("cpython-314-darwin.", "cpython-314-ios."))
+            if q != p:
+              p.rename(q)
+              renamed += 1
           print("renamed:", renamed)
           PY
 
@@ -167,14 +168,14 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           root = Path("numpy-install/iphoneos")
-          bad = list(root.rglob("*.cpython-314-darwin.fwork"))
-          good = list(root.rglob("*.cpython-314-ios.fwork"))
+          bad = list(root.rglob("*cpython-314-darwin.*"))
+          good = list(root.rglob("_multiarray_umath.cpython-314-ios.*"))
           print("numpy_bad_darwin_count:", len(bad))
-          print("numpy_good_ios_count:", len(good))
+          print("numpy_multiarray_ios_count:", len(good))
           if bad:
             raise SystemExit("still contains darwin.fwork binaries")
           if not good:
-            raise SystemExit("no ios.fwork numpy binary found")
+            raise SystemExit("no ios-tagged _multiarray_umath binary found")
           PY
 
       - name: Patch setup.py config path for iOS packaging
