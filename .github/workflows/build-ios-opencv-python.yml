@@ -330,6 +330,33 @@ jobs:
             raise SystemExit("no binaries (.so/.dylib) found in app_packages")
           PY
 
+      - name: Validate packaged binary runtime compatibility
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APP_ROOT="artifacts/ios-python-package/app_packages"
+
+          NUMPY_LINALG_BIN="$(find "${APP_ROOT}/numpy/linalg" -type f \( -name '_umath_linalg*.so' -o -name '_umath_linalg*.dylib' \) | head -n 1 || true)"
+          CV2_BIN="$(find "${APP_ROOT}/cv2" -type f \( -name 'cv2*.so' -o -name 'cv2*.dylib' \) | head -n 1 || true)"
+
+          test -n "${NUMPY_LINALG_BIN}"
+          test -n "${CV2_BIN}"
+          echo "numpy_linalg_bin=${NUMPY_LINALG_BIN}"
+          echo "cv2_bin=${CV2_BIN}"
+
+          for BIN in "${NUMPY_LINALG_BIN}" "${CV2_BIN}"; do
+            INFO="$(file "${BIN}")"
+            echo "${INFO}"
+            echo "${INFO}" | grep -q "Mach-O 64-bit"
+            echo "${INFO}" | grep -q "arm64"
+            PLATFORM="$(otool -l "${BIN}" | awk '/LC_BUILD_VERSION/{flag=1;next} flag && /platform/{print $2; exit}')"
+            echo "platform(${BIN})=${PLATFORM}"
+            test "${PLATFORM}" = "2"
+          done
+
+          # _umath_linalg depends on NEWLAPACK symbols; ensure it links against Accelerate.
+          otool -L "${NUMPY_LINALG_BIN}" | grep -q "Accelerate.framework"
+
       - name: Collect artifacts
         shell: bash
         run: |
