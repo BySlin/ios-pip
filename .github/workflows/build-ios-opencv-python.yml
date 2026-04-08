@@ -243,6 +243,15 @@ jobs:
             raise SystemExit(f"missing numpy package: {numpy_pkg}")
           shutil.copytree(numpy_pkg, app_packages / "numpy", dirs_exist_ok=True)
 
+          # Normalize NumPy extension suffix to iphoneos so Xcode-side
+          # Python extension discovery is consistent with cibuildwheel output.
+          renamed = 0
+          for so in (app_packages / "numpy").rglob("*cpython-314-darwin.so"):
+            dst = so.with_name(so.name.replace("cpython-314-darwin.so", "cpython-314-iphoneos.so"))
+            so.rename(dst)
+            renamed += 1
+          print("numpy_suffix_renamed_to_iphoneos:", renamed)
+
           wheel_file = next(Path("builder/wheelhouse").glob("*.whl"))
           wheel_unpack_dir = artifacts / "_opencv_wheel_unpack"
           if wheel_unpack_dir.exists():
@@ -281,6 +290,11 @@ jobs:
             raise SystemExit("missing numpy _multiarray_umath .so")
           if not cv2_bins:
             raise SystemExit("missing cv2 .so")
+
+          bad_numpy = sorted((app / "numpy").rglob("*cpython-314-darwin.so"))
+          print("numpy_darwin_suffix_count:", len(bad_numpy))
+          if bad_numpy:
+            raise SystemExit("numpy still contains darwin suffix .so files")
 
           so_files = sorted(app.rglob("*.so"))
           print("so_count:", len(so_files))
