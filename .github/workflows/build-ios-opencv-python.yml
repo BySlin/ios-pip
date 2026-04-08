@@ -149,18 +149,46 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          root = Path("numpy-install/iphoneos/lib/python3.14/site-packages/numpy")
-          if not root.is_dir():
-            raise SystemExit(f"missing numpy package: {root}")
-          bins = sorted(root.rglob("*.so"))
-          print("numpy_so_count:", len(bins))
-          for p in bins[:20]:
-            print(" ", p)
-          if not bins:
-            raise SystemExit("numpy package has no binary extensions")
-          PY
+          NUMPY_ROOT="numpy-install/iphoneos/lib/python3.14/site-packages/numpy"
+          test -d "${NUMPY_ROOT}"
+          mapfile -t NUMPY_BINS < <(find "${NUMPY_ROOT}" -type f -name '*.so' | sort)
+          echo "numpy_so_count=${#NUMPY_BINS[@]}"
+          if [ "${#NUMPY_BINS[@]}" -eq 0 ]; then
+            echo "numpy package has no binary extensions"
+            exit 1
+          fi
+
+          TARGET_BIN="$(find "${NUMPY_ROOT}" -type f -name '_multiarray_umath*.so' | head -n 1 || true)"
+          if [ -z "${TARGET_BIN}" ]; then
+            echo "missing numpy _multiarray_umath binary"
+            exit 1
+          fi
+          echo "target_numpy_bin=${TARGET_BIN}"
+          case "${TARGET_BIN}" in
+            *cpython-314-darwin.so|*cpython-314-iphoneos.so) ;;
+            *)
+              echo "unexpected numpy extension suffix: ${TARGET_BIN}"
+              exit 1
+              ;;
+          esac
+
+          FILE_INFO="$(file "${TARGET_BIN}")"
+          echo "${FILE_INFO}"
+          if ! echo "${FILE_INFO}" | grep -q "Mach-O 64-bit"; then
+            echo "numpy target is not Mach-O 64-bit"
+            exit 1
+          fi
+          if ! echo "${FILE_INFO}" | grep -q "arm64"; then
+            echo "numpy target is not arm64"
+            exit 1
+          fi
+
+          PLATFORM="$(otool -l "${TARGET_BIN}" | awk '/LC_BUILD_VERSION/{flag=1;next} flag && /platform/{print $2; exit}')"
+          echo "numpy_build_platform=${PLATFORM}"
+          if [ "${PLATFORM}" != "2" ]; then
+            echo "expected iOS platform=2, got ${PLATFORM}"
+            exit 1
+          fi
 
       - name: Patch setup.py config path for iOS packaging
         shell: bash
@@ -283,23 +311,23 @@ jobs:
             raise SystemExit("missing numpy or cv2 package")
 
           numpy_bins = sorted((app / "numpy").rglob("_multiarray_umath*.so"))
-          cv2_bins = sorted((app / "cv2").rglob("cv2*.so"))
+          cv2_bins = sorted((app / "cv2").rglob("cv2*.so")) + sorted((app / "cv2").rglob("cv2*.dylib"))
           print("numpy_multiarray_so_count:", len(numpy_bins))
-          print("cv2_so_count:", len(cv2_bins))
+          print("cv2_binary_count:", len(cv2_bins))
           if not numpy_bins:
             raise SystemExit("missing numpy _multiarray_umath .so")
           if not cv2_bins:
-            raise SystemExit("missing cv2 .so")
+            raise SystemExit("missing cv2 binary (.so/.dylib)")
 
           bad_numpy = sorted((app / "numpy").rglob("*cpython-314-darwin.so"))
           print("numpy_darwin_suffix_count:", len(bad_numpy))
           if bad_numpy:
             raise SystemExit("numpy still contains darwin suffix .so files")
 
-          so_files = sorted(app.rglob("*.so"))
-          print("so_count:", len(so_files))
-          if not so_files:
-            raise SystemExit("no .so files found in app_packages")
+          bins = sorted(app.rglob("*.so")) + sorted(app.rglob("*.dylib"))
+          print("binary_count:", len(bins))
+          if not bins:
+            raise SystemExit("no binaries (.so/.dylib) found in app_packages")
           PY
 
       - name: Collect artifacts

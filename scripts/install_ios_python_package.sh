@@ -44,11 +44,22 @@ fi
 
 mkdir -p "${APP_PACKAGES_DIR}"
 
+# Remove stale package content before copy to avoid leftovers from prior formats
+# (e.g. old .fwork markers or outdated module trees).
+rm -rf "${APP_PACKAGES_DIR}/numpy" "${APP_PACKAGES_DIR}/cv2"
+
 cp -R "${PKG_ROOT}/app_packages/." "${APP_PACKAGES_DIR}/"
 echo "Installed app packages to: ${APP_PACKAGES_DIR}"
 
 if [[ -d "${PKG_ROOT}/Frameworks" ]]; then
   mkdir -p "${FRAMEWORKS_DIR}"
+  # Clear stale numpy/cv2 extension frameworks from previous installs.
+  find "${FRAMEWORKS_DIR}" -maxdepth 1 -type d \( -name 'numpy.*.framework' -o -name 'cv2.*.framework' \) -exec rm -rf {} +
   cp -R "${PKG_ROOT}/Frameworks/." "${FRAMEWORKS_DIR}/"
   echo "Installed frameworks to: ${FRAMEWORKS_DIR}"
+else
+  # Package no longer ships frameworks by default; remove stale numpy/cv2 frameworks.
+  if [[ -d "${FRAMEWORKS_DIR}" ]]; then
+    find "${FRAMEWORKS_DIR}" -maxdepth 1 -type d \( -name 'numpy.*.framework' -o -name 'cv2.*.framework' \) -exec rm -rf {} +
+  fi
 fi
