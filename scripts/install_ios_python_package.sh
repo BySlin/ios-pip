@@ -3,12 +3,11 @@ set -euo pipefail
 
 # Usage:
 #   ./scripts/install_ios_python_package.sh \
-#     /path/to/ios-python-apple-support-package-cp314-arm64-iphoneos.tar.gz \
+#     /path/to/ios-python-package-cp314-arm64-iphoneos.tar.gz \
 #     /path/to/YourApp.app
 #
 # This script installs:
 # - app_packages/*
-# - Frameworks/*
 # into an iOS app bundle.
 
 if [[ $# -ne 2 ]]; then
@@ -43,16 +42,13 @@ if [[ ! -d "${PKG_ROOT}/app_packages" ]]; then
   exit 1
 fi
 
-if [[ ! -d "${PKG_ROOT}/Frameworks" ]]; then
-  echo "Invalid package: missing Frameworks"
-  exit 1
-fi
-
 mkdir -p "${APP_PACKAGES_DIR}"
-mkdir -p "${FRAMEWORKS_DIR}"
 
 cp -R "${PKG_ROOT}/app_packages/." "${APP_PACKAGES_DIR}/"
-cp -R "${PKG_ROOT}/Frameworks/." "${FRAMEWORKS_DIR}/"
-
 echo "Installed app packages to: ${APP_PACKAGES_DIR}"
-echo "Installed frameworks to: ${FRAMEWORKS_DIR}"
+
+if [[ -d "${PKG_ROOT}/Frameworks" ]]; then
+  mkdir -p "${FRAMEWORKS_DIR}"
+  cp -R "${PKG_ROOT}/Frameworks/." "${FRAMEWORKS_DIR}/"
+  echo "Installed frameworks to: ${FRAMEWORKS_DIR}"
+fi

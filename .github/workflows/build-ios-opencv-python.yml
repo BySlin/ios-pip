@@ -145,84 +145,21 @@ jobs:
           test -d "${NUMPY_INCLUDE_DIR}"
           echo "CMAKE_ARGS=-DPYTHON3_NUMPY_INCLUDE_DIRS=${NUMPY_INCLUDE_DIR}" >> "${GITHUB_ENV}"
 
-      - name: Normalize NumPy iOS extension suffix
+      - name: Validate NumPy package contains extension modules
         shell: bash
         run: |
           set -euxo pipefail
           python - <<'PY'
           from pathlib import Path
-          root = Path("numpy-install/iphoneos")
-          renamed = 0
-          for p in root.rglob("*cpython-314-darwin.*"):
-            q = p.with_name(p.name.replace("cpython-314-darwin.", "cpython-314-ios."))
-            if q != p:
-              p.rename(q)
-              renamed += 1
-          print("renamed:", renamed)
-          PY
-
-      - name: Convert NumPy extensions to iOS frameworks
-        shell: bash
-        run: |
-          set -euxo pipefail
-          python - <<'PY'
-          import re
-          import shutil
-          from pathlib import Path
-
-          root = Path("numpy-install/iphoneos")
-          site = root / "lib" / "python3.14" / "site-packages"
-          fw_root = root / "Frameworks"
-          fw_root.mkdir(parents=True, exist_ok=True)
-
-          converted = 0
-          for so in site.rglob("*.so"):
-            if "cpython-314-ios" not in so.name:
-              continue
-            rel = so.relative_to(site)
-            mod_base = re.sub(r"\.cpython-314-ios\.so$", "", so.name)
-            fullmod = ".".join(list(rel.parts[:-1]) + [mod_base])
-            framework_dir = fw_root / f"{fullmod}.framework"
-            framework_dir.mkdir(parents=True, exist_ok=True)
-            framework_bin = framework_dir / fullmod
-            shutil.copy2(so, framework_bin)
-
-            info = framework_dir / "Info.plist"
-            if not info.exists():
-              info.write_text(
-                """<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>CFBundlePackageType</key><string>FMWK</string><key>CFBundleExecutable</key><string>{name}</string><key>CFBundleIdentifier</key><string>org.python.extension.{name}</string></dict></plist>\n""".format(name=fullmod),
-                encoding="utf-8",
-              )
-
-            fwork = so.with_suffix(".fwork")
-            fwork.write_text(f"Frameworks/{fullmod}.framework/{fullmod}", encoding="utf-8")
-            origin = framework_dir / f"{fullmod}.origin"
-            origin.write_text(fwork.relative_to(root).as_posix(), encoding="utf-8")
-            so.unlink()
-            converted += 1
-
-          print("framework_converted:", converted)
-          PY
-
-      - name: Validate NumPy iOS extension suffix
-        shell: bash
-        run: |
-          set -euxo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          root = Path("numpy-install/iphoneos")
-          bad = list(root.rglob("*cpython-314-darwin.*"))
-          good = list(root.rglob("_multiarray_umath.cpython-314-ios.fwork"))
-          fw = list(root.rglob("numpy._core._multiarray_umath.framework/numpy._core._multiarray_umath"))
-          print("numpy_bad_darwin_count:", len(bad))
-          print("numpy_multiarray_fwork_count:", len(good))
-          print("numpy_multiarray_framework_bin_count:", len(fw))
-          if bad:
-            raise SystemExit("still contains darwin.fwork binaries")
-          if not good:
-            raise SystemExit("no ios-tagged _multiarray_umath fwork marker found")
-          if not fw:
-            raise SystemExit("no framework binary found for _multiarray_umath")
+          root = Path("numpy-install/iphoneos/lib/python3.14/site-packages/numpy")
+          if not root.is_dir():
+            raise SystemExit(f"missing numpy package: {root}")
+          bins = sorted(root.rglob("*.so"))
+          print("numpy_so_count:", len(bins))
+          for p in bins[:20]:
+            print(" ", p)
+          if not bins:
+            raise SystemExit("numpy package has no binary extensions")
           PY
 
       - name: Patch setup.py config path for iOS packaging
@@ -287,13 +224,11 @@ jobs:
             raise SystemExit("wheel has no compiled cv2 binary")
           PY
 
-      - name: Build Python-Apple-support ready package (NumPy + OpenCV)
+      - name: Build Python-Apple-support package (let build_utils process .so)
         shell: bash
         run: |
           set -euxo pipefail
           python - <<'PY'
-          import plistlib
-          import re
           import shutil
           import zipfile
           from pathlib import Path
@@ -301,18 +236,12 @@ jobs:
           artifacts = Path("artifacts")
           package_root = artifacts / "ios-python-package"
           app_packages = package_root / "app_packages"
-          frameworks = package_root / "Frameworks"
           app_packages.mkdir(parents=True, exist_ok=True)
-          frameworks.mkdir(parents=True, exist_ok=True)
 
           numpy_pkg = Path("numpy-install/iphoneos/lib/python3.14/site-packages/numpy")
-          numpy_frameworks = Path("numpy-install/iphoneos/Frameworks")
           if not numpy_pkg.is_dir():
             raise SystemExit(f"missing numpy package: {numpy_pkg}")
-          if not numpy_frameworks.is_dir():
-            raise SystemExit(f"missing numpy frameworks: {numpy_frameworks}")
           shutil.copytree(numpy_pkg, app_packages / "numpy", dirs_exist_ok=True)
-          shutil.copytree(numpy_frameworks, frameworks, dirs_exist_ok=True)
 
           wheel_file = next(Path("builder/wheelhouse").glob("*.whl"))
           wheel_unpack_dir = artifacts / "_opencv_wheel_unpack"
@@ -325,49 +254,7 @@ jobs:
           if not cv2_pkg.is_dir():
             raise SystemExit("cv2 package directory not found in wheel")
           shutil.copytree(cv2_pkg, app_packages / "cv2", dirs_exist_ok=True)
-
-          renamed = 0
-          for so in (app_packages / "cv2").rglob("*cpython-314-iphoneos.so"):
-            so.rename(so.with_name(so.name.replace("cpython-314-iphoneos.so", "cpython-314-ios.so")))
-            renamed += 1
-          for so in (app_packages / "cv2").rglob("*cpython-314-darwin.so"):
-            so.rename(so.with_name(so.name.replace("cpython-314-darwin.so", "cpython-314-ios.so")))
-            renamed += 1
-
-          converted = 0
-          for so in app_packages.rglob("*.so"):
-            if ".cpython-314-ios.so" not in so.name:
-              continue
-            rel = so.relative_to(app_packages)
-            mod_base = re.sub(r"\.cpython-314-ios\.so$", "", so.name)
-            fullmod = ".".join(list(rel.parts[:-1]) + [mod_base])
-
-            framework_dir = frameworks / f"{fullmod}.framework"
-            framework_dir.mkdir(parents=True, exist_ok=True)
-            framework_bin = framework_dir / fullmod
-            shutil.copy2(so, framework_bin)
-
-            info = framework_dir / "Info.plist"
-            if not info.exists():
-              with info.open("wb") as f:
-                plistlib.dump(
-                  {
-                    "CFBundlePackageType": "FMWK",
-                    "CFBundleExecutable": fullmod,
-                    "CFBundleIdentifier": f"org.python.extension.{fullmod}",
-                  },
-                  f,
-                )
-
-            fwork = so.with_suffix(".fwork")
-            fwork.write_text(f"Frameworks/{fullmod}.framework/{fullmod}", encoding="utf-8")
-            origin = framework_dir / f"{fullmod}.origin"
-            origin.write_text(fwork.relative_to(package_root).as_posix(), encoding="utf-8")
-            so.unlink()
-            converted += 1
-
-          print("opencv_suffix_renamed:", renamed)
-          print("framework_converted:", converted)
+          print("package_root:", package_root)
           PY
 
       - name: Validate Python-Apple-support package layout
@@ -379,26 +266,26 @@ jobs:
 
           root = Path("artifacts/ios-python-package")
           app = root / "app_packages"
-          fw = root / "Frameworks"
-          checks = {
-            "numpy_pkg": app / "numpy",
-            "cv2_pkg": app / "cv2",
-            "numpy_multiarray_fwork": app / "numpy/_core/_multiarray_umath.cpython-314-ios.fwork",
-            "numpy_multiarray_framework_bin": fw / "numpy._core._multiarray_umath.framework/numpy._core._multiarray_umath",
-            "cv2_fwork": app / "cv2/cv2.cpython-314-ios.fwork",
-            "cv2_framework_bin": fw / "cv2.cv2.framework/cv2.cv2",
-          }
-          for key, path in checks.items():
-            print(key, path.exists(), path)
-            if not path.exists():
-              raise SystemExit(f"missing required path: {path}")
+          numpy_pkg = app / "numpy"
+          cv2_pkg = app / "cv2"
+          print("numpy_pkg", numpy_pkg.exists(), numpy_pkg)
+          print("cv2_pkg", cv2_pkg.exists(), cv2_pkg)
+          if not numpy_pkg.exists() or not cv2_pkg.exists():
+            raise SystemExit("missing numpy or cv2 package")
 
-          stray = [p for p in app.rglob("*.so")]
-          print("stray_so_count:", len(stray))
-          if stray:
-            for p in stray[:20]:
-              print(" stray:", p)
-            raise SystemExit("unexpected .so left in app_packages")
+          numpy_bins = sorted((app / "numpy").rglob("_multiarray_umath*.so"))
+          cv2_bins = sorted((app / "cv2").rglob("cv2*.so"))
+          print("numpy_multiarray_so_count:", len(numpy_bins))
+          print("cv2_so_count:", len(cv2_bins))
+          if not numpy_bins:
+            raise SystemExit("missing numpy _multiarray_umath .so")
+          if not cv2_bins:
+            raise SystemExit("missing cv2 .so")
+
+          so_files = sorted(app.rglob("*.so"))
+          print("so_count:", len(so_files))
+          if not so_files:
+            raise SystemExit("no .so files found in app_packages")
           PY
 
       - name: Collect artifacts
@@ -412,7 +299,7 @@ jobs:
 
           tar -czf opencv-python-ios-cp314-arm64-iphoneos.tar.gz -C artifacts wheelhouse
           tar -czf numpy-ios-arm64-iphoneos-install.tar.gz -C artifacts numpy-install-iphoneos
-          tar -czf ios-python-apple-support-package-cp314-arm64-iphoneos.tar.gz -C artifacts ios-python-package
+          tar -czf ios-python-package-cp314-arm64-iphoneos.tar.gz -C artifacts ios-python-package
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -422,7 +309,7 @@ jobs:
             opencv-python-ios-cp314-arm64-iphoneos.whl
             opencv-python-ios-cp314-arm64-iphoneos.tar.gz
             numpy-ios-arm64-iphoneos-install.tar.gz
-            ios-python-apple-support-package-cp314-arm64-iphoneos.tar.gz
+            ios-python-package-cp314-arm64-iphoneos.tar.gz
             artifacts/wheelhouse/*.whl
             artifacts/numpy-install-iphoneos/**
             artifacts/ios-python-package/**
