@@ -258,6 +258,7 @@ jobs:
           set -euxo pipefail
           python - <<'PY'
           import shutil
+          import textwrap
           import zipfile
           from pathlib import Path
 
@@ -291,6 +292,54 @@ jobs:
           if not cv2_pkg.is_dir():
             raise SystemExit("cv2 package directory not found in wheel")
           shutil.copytree(cv2_pkg, app_packages / "cv2", dirs_exist_ok=True)
+
+          # Some upstream builds emit a broken cv2/__init__.py fragment for iOS
+          # (e.g. starts with LOADER_DIR without imports). Replace with a minimal
+          # loader that imports the extension binary by explicit path.
+          cv2_init = app_packages / "cv2" / "__init__.py"
+          if cv2_init.exists():
+            current = cv2_init.read_text(encoding="utf-8")
+          else:
+            current = ""
+          if "LOADER_DIR" in current or "PYTHON_EXTENSIONS_PATHS" in current:
+            cv2_init.write_text(
+              textwrap.dedent(
+                """\
+                import importlib.machinery as _machinery
+                import importlib.util as _util
+                import pathlib as _pathlib
+                import sys as _sys
+
+                _PKG_DIR = _pathlib.Path(__file__).resolve().parent
+                _CANDIDATES = sorted(
+                    p for p in _PKG_DIR.iterdir()
+                    if p.is_file() and p.name.startswith("cv2") and p.suffix in (".so", ".dylib")
+                )
+                if not _CANDIDATES:
+                    raise ImportError("cv2 extension binary not found")
+
+                _BIN = _CANDIDATES[0]
+                _MOD_NAME = __name__ + ".cv2"
+                _LOADER = _machinery.ExtensionFileLoader(_MOD_NAME, str(_BIN))
+                _SPEC = _util.spec_from_file_location(_MOD_NAME, str(_BIN), loader=_LOADER)
+                if _SPEC is None:
+                    raise ImportError(f"failed to create spec for {_BIN}")
+                _MOD = _util.module_from_spec(_SPEC)
+                _sys.modules[_MOD_NAME] = _MOD
+                _LOADER.exec_module(_MOD)
+
+                for _k, _v in _MOD.__dict__.items():
+                    if _k.startswith("__") and _k not in {"__doc__", "__all__", "__version__"}:
+                        continue
+                    globals()[_k] = _v
+
+                cv2 = _MOD
+                __all__ = getattr(_MOD, "__all__", [k for k in globals() if not k.startswith("_")])
+                """
+              ),
+              encoding="utf-8",
+            )
+            print("rewrote broken cv2/__init__.py for ios loader")
           print("package_root:", package_root)
           PY
 
@@ -323,6 +372,15 @@ jobs:
           print("numpy_darwin_suffix_count:", len(bad_numpy))
           if bad_numpy:
             raise SystemExit("numpy still contains darwin suffix .so files")
+
+          cv2_init = app / "cv2" / "__init__.py"
+          if not cv2_init.exists():
+            raise SystemExit("missing cv2/__init__.py")
+          txt = cv2_init.read_text(encoding="utf-8")
+          if "LOADER_DIR" in txt:
+            raise SystemExit("broken cv2/__init__.py contains unresolved LOADER_DIR")
+          if "ExtensionFileLoader" not in txt:
+            raise SystemExit("cv2/__init__.py does not contain binary loader code")
 
           bins = sorted(app.rglob("*.so")) + sorted(app.rglob("*.dylib"))
           print("binary_count:", len(bins))
