@@ -151,9 +151,9 @@ jobs:
           set -euxo pipefail
           NUMPY_ROOT="numpy-install/iphoneos/lib/python3.14/site-packages/numpy"
           test -d "${NUMPY_ROOT}"
-          mapfile -t NUMPY_BINS < <(find "${NUMPY_ROOT}" -type f -name '*.so' | sort)
-          echo "numpy_so_count=${#NUMPY_BINS[@]}"
-          if [ "${#NUMPY_BINS[@]}" -eq 0 ]; then
+          NUMPY_SO_COUNT="$(find "${NUMPY_ROOT}" -type f -name '*.so' | wc -l | tr -d ' ')"
+          echo "numpy_so_count=${NUMPY_SO_COUNT}"
+          if [ "${NUMPY_SO_COUNT}" = "0" ]; then
             echo "numpy package has no binary extensions"
             exit 1
           fi
