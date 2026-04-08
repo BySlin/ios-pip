@@ -293,6 +293,28 @@ jobs:
             raise SystemExit("cv2 package directory not found in wheel")
           shutil.copytree(cv2_pkg, app_packages / "cv2", dirs_exist_ok=True)
 
+          # Preserve top-level OpenCV runtime/support directories from the wheel.
+          # Some builds may emit auxiliary files under opencv_*.libs/.data/.dist-info.
+          copied_opencv_roots = []
+          for entry in sorted(wheel_unpack_dir.iterdir()):
+            name = entry.name
+            if not name.startswith("opencv_"):
+              continue
+            if not (
+              name.endswith(".libs")
+              or name.endswith(".data")
+              or name.endswith(".dist-info")
+            ):
+              continue
+            dst = app_packages / name
+            if entry.is_dir():
+              shutil.copytree(entry, dst, dirs_exist_ok=True)
+            else:
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(entry, dst)
+            copied_opencv_roots.append(name)
+          print("opencv_extra_roots:", copied_opencv_roots)
+
           # Some upstream builds emit a broken cv2/__init__.py fragment for iOS
           # (e.g. starts with LOADER_DIR without imports). Replace with a minimal
           # loader that imports the extension binary by explicit path.
@@ -361,12 +383,16 @@ jobs:
 
           numpy_bins = sorted((app / "numpy").rglob("_multiarray_umath*.so"))
           cv2_bins = sorted((app / "cv2").rglob("cv2*.so")) + sorted((app / "cv2").rglob("cv2*.dylib"))
+          cv2_so_bins = sorted((app / "cv2").rglob("cv2*.so"))
           print("numpy_multiarray_so_count:", len(numpy_bins))
           print("cv2_binary_count:", len(cv2_bins))
+          print("cv2_so_count:", len(cv2_so_bins))
           if not numpy_bins:
             raise SystemExit("missing numpy _multiarray_umath .so")
           if not cv2_bins:
             raise SystemExit("missing cv2 binary (.so/.dylib)")
+          if not cv2_so_bins:
+            raise SystemExit("missing cv2 .so; build_utils.sh only processes .so extension modules")
 
           bad_numpy = sorted((app / "numpy").rglob("*cpython-314-darwin.so"))
           print("numpy_darwin_suffix_count:", len(bad_numpy))
@@ -386,6 +412,12 @@ jobs:
           print("binary_count:", len(bins))
           if not bins:
             raise SystemExit("no binaries (.so/.dylib) found in app_packages")
+
+          opencv_lib_dirs = sorted(
+            p.name for p in app.iterdir()
+            if p.is_dir() and p.name.startswith("opencv_") and p.name.endswith(".libs")
+          )
+          print("opencv_lib_dirs:", opencv_lib_dirs)
           PY
 
       - name: Validate packaged binary runtime compatibility
@@ -395,7 +427,7 @@ jobs:
           APP_ROOT="artifacts/ios-python-package/app_packages"
 
           NUMPY_LINALG_BIN="$(find "${APP_ROOT}/numpy/linalg" -type f \( -name '_umath_linalg*.so' -o -name '_umath_linalg*.dylib' \) | head -n 1 || true)"
-          CV2_BIN="$(find "${APP_ROOT}/cv2" -type f \( -name 'cv2*.so' -o -name 'cv2*.dylib' \) | head -n 1 || true)"
+          CV2_BIN="$(find "${APP_ROOT}/cv2" -type f -name 'cv2*.so' | head -n 1 || true)"
 
           test -n "${NUMPY_LINALG_BIN}"
           test -n "${CV2_BIN}"
@@ -414,6 +446,28 @@ jobs:
 
           # _umath_linalg depends on NEWLAPACK symbols; ensure it links against Accelerate.
           otool -L "${NUMPY_LINALG_BIN}" | grep -q "Accelerate.framework"
+
+          # Python-Apple-support build_utils.sh converts .so to frameworks.
+          # Reject cv2 linkage against wheel-side opencv_*.libs payloads, because
+          # those dylibs are not transformed by build_utils.sh.
+          CV2_DEPS="$(otool -L "${CV2_BIN}" | tail -n +2 | awk '{print $1}')"
+          echo "cv2_deps:"
+          echo "${CV2_DEPS}"
+          while IFS= read -r DEP; do
+            [[ -z "${DEP}" ]] && continue
+            case "${DEP}" in
+              /System/*|/usr/lib/*|@rpath/Python.framework/*|@rpath/libpython*|@loader_path/*|@rpath/*.framework/*)
+                ;;
+              *)
+                echo "Unsupported cv2 dependency for iOS app embedding: ${DEP}"
+                exit 1
+                ;;
+            esac
+            if [[ "${DEP}" == *"opencv_"*".libs"* ]]; then
+              echo "cv2 depends on opencv_*.libs payload, which is incompatible with build_utils.sh: ${DEP}"
+              exit 1
+            fi
+          done <<< "${CV2_DEPS}"
 
       - name: Collect artifacts
         shell: bash
