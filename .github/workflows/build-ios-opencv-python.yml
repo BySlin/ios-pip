@@ -22,6 +22,8 @@ jobs:
       CIBW_ARCHS: arm64_iphoneos
       CIBW_BUILD_VERBOSITY: "2"
       IPHONEOS_DEPLOYMENT_TARGET: "13.0"
+      NUMPY_GIT_URL: "https://github.com/freakboy3742/numpy.git"
+      NUMPY_GIT_REF: "ios-support"
 
     steps:
       - name: Checkout
@@ -46,7 +48,7 @@ jobs:
         run: |
           set -euxo pipefail
           rm -rf numpy-builder numpy-build numpy-install
-          git clone --depth=1 --branch v2.4.4 --recurse-submodules --shallow-submodules https://github.com/numpy/numpy.git numpy-builder
+          git clone --depth=1 --branch "${NUMPY_GIT_REF}" --recurse-submodules --shallow-submodules "${NUMPY_GIT_URL}" numpy-builder
 
           SYSROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
           CC="$(xcrun --sdk iphoneos --find clang)"
