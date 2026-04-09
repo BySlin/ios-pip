@@ -145,7 +145,7 @@ jobs:
             )"
           fi
           test -d "${NUMPY_INCLUDE_DIR}"
-          echo "CMAKE_ARGS=-DPYTHON3_NUMPY_INCLUDE_DIRS=${NUMPY_INCLUDE_DIR}" >> "${GITHUB_ENV}"
+          echo "CMAKE_ARGS=-DPYTHON3_NUMPY_INCLUDE_DIRS=${NUMPY_INCLUDE_DIR} -DBUILD_opencv_dnn=OFF -DBUILD_opencv_gapi=OFF" >> "${GITHUB_ENV}"
 
       - name: Validate NumPy package contains extension modules
         shell: bash
