@@ -362,7 +362,7 @@ jobs:
                 if _BIN is None:
                     raise ImportError("cv2 extension binary not found (.so/.dylib/.fwork)")
 
-                _MOD_NAME = __name__ + ".cv2"
+                _MOD_NAME = __name__
                 _LOADER = _machinery.ExtensionFileLoader(_MOD_NAME, str(_BIN))
                 _SPEC = _util.spec_from_file_location(_MOD_NAME, str(_BIN), loader=_LOADER)
                 if _SPEC is None:
@@ -376,7 +376,6 @@ jobs:
                         continue
                     globals()[_k] = _v
 
-                cv2 = _MOD
                 __all__ = getattr(_MOD, "__all__", [k for k in globals() if not k.startswith("_")])
                 """
               ),
