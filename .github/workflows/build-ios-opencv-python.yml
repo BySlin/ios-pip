@@ -62,7 +62,7 @@ jobs:
           )
           old = "return self.interpreter.build_target(self.current_node, args, kwargs, SharedModule)"
           new = (
-            "target_cls = SharedLibrary if 'ios' in self.platform else SharedModule\n"
+            "target_cls = SharedLibrary\n"
             "        return self.interpreter.build_target(self.current_node, args, kwargs, target_cls)"
           )
           if old not in s:
