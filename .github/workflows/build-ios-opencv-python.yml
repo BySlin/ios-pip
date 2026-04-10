@@ -50,6 +50,28 @@ jobs:
           rm -rf numpy-builder numpy-build numpy-install
           git clone --depth=1 --branch "${NUMPY_GIT_REF}" --recurse-submodules --shallow-submodules "${NUMPY_GIT_URL}" numpy-builder
 
+          # Force iOS Python extensions to link as MH_DYLIB (not MH_BUNDLE),
+          # so Python-Apple-support build_utils produced frameworks pass ASC checks.
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("numpy-builder/vendored-meson/meson/mesonbuild/modules/python.py")
+          s = p.read_text(encoding="utf-8")
+          s = s.replace(
+            "ExtractedObjects, SharedModule",
+            "ExtractedObjects, SharedModule, SharedLibrary",
+          )
+          old = "return self.interpreter.build_target(self.current_node, args, kwargs, SharedModule)"
+          new = (
+            "target_cls = SharedLibrary if 'ios' in self.platform else SharedModule\n"
+            "        return self.interpreter.build_target(self.current_node, args, kwargs, target_cls)"
+          )
+          if old not in s:
+            raise SystemExit("failed to patch vendored meson python extension target type")
+          s = s.replace(old, new)
+          p.write_text(s, encoding="utf-8")
+          print("patched", p)
+          PY
+
           SYSROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
           CC="$(xcrun --sdk iphoneos --find clang)"
           CXX="$(xcrun --sdk iphoneos --find clang++)"
@@ -223,6 +245,23 @@ jobs:
           print("patched", p)
           PY
 
+      - name: Patch OpenCV Python extension target type for iOS
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("builder/opencv/modules/python/common.cmake")
+          s = p.read_text(encoding="utf-8")
+          old = "ocv_add_library(${the_module} MODULE"
+          new = "ocv_add_library(${the_module} SHARED"
+          if old not in s:
+            raise SystemExit("failed to find OpenCV python MODULE target declaration")
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding="utf-8")
+          print("patched", p)
+          PY
+
       - name: Build iOS wheel via cibuildwheel
         shell: bash
         run: |
@@ -302,11 +341,7 @@ jobs:
             name = entry.name
             if not name.startswith("opencv_"):
               continue
-            if not (
-              name.endswith(".libs")
-              or name.endswith(".data")
-              or name.endswith(".dist-info")
-            ):
+            if not (name.endswith(".data") or name.endswith(".dist-info")):
               continue
             dst = app_packages / name
             if entry.is_dir():
@@ -382,6 +417,24 @@ jobs:
               encoding="utf-8",
             )
             print("rewrote broken cv2/__init__.py for ios loader")
+
+          # Strip artifacts rejected by App Store validation:
+          # - static archives (.a)
+          # - NumPy test extension binaries
+          removed_static = 0
+          removed_test_ext = 0
+          for f in app_packages.rglob("*.a"):
+            f.unlink()
+            removed_static += 1
+          for f in (app_packages / "numpy").rglob("*_tests*.so"):
+            f.unlink()
+            removed_test_ext += 1
+          for f in (app_packages / "numpy").rglob("*_tests*.dylib"):
+            f.unlink()
+            removed_test_ext += 1
+          print("removed_static_archives:", removed_static)
+          print("removed_numpy_test_extensions:", removed_test_ext)
+
           print("package_root:", package_root)
           PY
 
@@ -432,6 +485,10 @@ jobs:
           print("binary_count:", len(bins))
           if not bins:
             raise SystemExit("no binaries (.so/.dylib) found in app_packages")
+          static_archives = sorted(app.rglob("*.a"))
+          print("static_archive_count:", len(static_archives))
+          if static_archives:
+            raise SystemExit("static archives (.a) remain in app_packages")
 
           opencv_lib_dirs = sorted(
             p.name for p in app.iterdir()
@@ -462,6 +519,9 @@ jobs:
             PLATFORM="$(otool -l "${BIN}" | awk '/LC_BUILD_VERSION/{flag=1;next} flag && /platform/{print $2; exit}')"
             echo "platform(${BIN})=${PLATFORM}"
             test "${PLATFORM}" = "2"
+            TYPE="$(otool -hv "${BIN}" | awk 'NR==4{print $5}')"
+            echo "filetype(${BIN})=${TYPE}"
+            test "${TYPE}" = "DYLIB"
           done
 
           # Log linalg link dependencies for diagnostics; don't hard-fail on
