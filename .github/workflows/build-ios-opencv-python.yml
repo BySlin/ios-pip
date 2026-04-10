@@ -446,6 +446,14 @@ jobs:
           print("removed_static_archives:", removed_static)
           print("removed_numpy_test_extensions:", removed_test_ext)
 
+          # Remove Python bytecode caches from packaged payload.
+          removed_pycache_dirs = 0
+          for d in list(app_packages.rglob("__pycache__")):
+            if d.is_dir():
+              shutil.rmtree(d)
+              removed_pycache_dirs += 1
+          print("removed_pycache_dirs:", removed_pycache_dirs)
+
           print("package_root:", package_root)
           PY
 
@@ -500,6 +508,10 @@ jobs:
           print("static_archive_count:", len(static_archives))
           if static_archives:
             raise SystemExit("static archives (.a) remain in app_packages")
+          pycache_dirs = sorted(p for p in app.rglob("__pycache__") if p.is_dir())
+          print("pycache_dir_count:", len(pycache_dirs))
+          if pycache_dirs:
+            raise SystemExit("__pycache__ directories remain in app_packages")
 
           opencv_lib_dirs = sorted(
             p.name for p in app.iterdir()
