@@ -60,14 +60,16 @@ jobs:
             "ExtractedObjects, SharedModule",
             "ExtractedObjects, SharedModule, SharedLibrary",
           )
-          dep_patch = """kwargs['dependencies'] = new_deps
-
-        for_machine = kwargs['native']
-        if self.interpreter.environment.machines[for_machine].is_darwin():
-            new_link_args = mesonlib.extract_as_list(kwargs, 'link_args')
-            if '-undefined' not in new_link_args:
-                new_link_args.extend(['-undefined', 'dynamic_lookup'])
-            kwargs['link_args'] = new_link_args"""
+          dep_patch = "\n".join([
+            "kwargs['dependencies'] = new_deps",
+            "",
+            "        for_machine = kwargs['native']",
+            "        if self.interpreter.environment.machines[for_machine].is_darwin():",
+            "            new_link_args = mesonlib.extract_as_list(kwargs, 'link_args')",
+            "            if '-undefined' not in new_link_args:",
+            "                new_link_args.extend(['-undefined', 'dynamic_lookup'])",
+            "            kwargs['link_args'] = new_link_args",
+          ])
           s = s.replace("kwargs['dependencies'] = new_deps", dep_patch, 1)
           old = "return self.interpreter.build_target(self.current_node, args, kwargs, SharedModule)"
           new = (
