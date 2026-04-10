@@ -549,7 +549,7 @@ jobs:
           while IFS= read -r DEP; do
             [[ -z "${DEP}" ]] && continue
             case "${DEP}" in
-              /System/*|/usr/lib/*|@rpath/Python.framework/*|@rpath/libpython*|@loader_path/*|@rpath/*.framework/*)
+              /System/*|/usr/lib/*|@rpath/Python.framework/*|@rpath/libpython*|@loader_path/*|@rpath/*.framework/*|@rpath/cv2*.so)
                 ;;
               *)
                 echo "Unsupported cv2 dependency for iOS app embedding: ${DEP}"
